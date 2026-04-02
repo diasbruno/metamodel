@@ -75,6 +75,134 @@ defmodule MetaDslSingleFileTest do
   end
 end
 
+defmodule MetaDslSharedUserModelTest do
+  use ExUnit.Case, async: true
+
+  defmodule FullSchema do
+    use MetaDsl
+
+    meta_type :user do
+      property :id,            :uuid,     required: true
+      property :name,          :string,   required: true
+      property :email,         :string,   required: true
+      property :password_hash, :string,   required: true
+      property :role,          :string,   required: true
+      property :inserted_at,   :datetime, required: true
+    end
+
+    # Option A — CRUD input shapes
+    subtype :create_user, from: :user, except: [:id, :inserted_at]
+    subtype :update_user, from: :user, only:   [:id, :name, :email]
+    subtype :delete_user, from: :user, only:   [:id]
+
+    # Option B — API response shapes
+    subtype :public_user,  from: :user, only:   [:id, :name]
+    subtype :session_user, from: :user, except: [:password_hash]
+
+    extend_type :admin_user, from: :user do
+      property :permissions, {:list, :string}, required: true
+    end
+
+    # Option C — domain events
+    extend_type :user_created_event, from: :user do
+      property :occurred_at, :datetime, required: true
+    end
+
+    subtype :user_deleted_event, from: :user, only: [:id]
+  end
+
+  # Option A — CRUD input shapes
+
+  test "create_user excludes server-generated fields" do
+    assert %MetaDsl.MetaType{derived_from: %MetaDsl.Derivation{kind: :project, from: :user}} =
+             FullSchema.meta_type(:create_user)
+
+    assert [:name, :email, :password_hash, :role] =
+             FullSchema.properties(:create_user) |> Enum.map(& &1.name)
+  end
+
+  test "update_user contains only the key and editable fields" do
+    assert %MetaDsl.MetaType{derived_from: %MetaDsl.Derivation{kind: :project, from: :user}} =
+             FullSchema.meta_type(:update_user)
+
+    assert [:id, :name, :email] =
+             FullSchema.properties(:update_user) |> Enum.map(& &1.name)
+  end
+
+  test "delete_user contains only the key" do
+    assert [:id] =
+             FullSchema.properties(:delete_user) |> Enum.map(& &1.name)
+  end
+
+  # Option B — API response shapes
+
+  test "public_user exposes only safe fields for anonymous visitors" do
+    assert [:id, :name] =
+             FullSchema.properties(:public_user) |> Enum.map(& &1.name)
+  end
+
+  test "session_user omits the password hash" do
+    assert %MetaDsl.MetaType{derived_from: %MetaDsl.Derivation{kind: :project, from: :user}} =
+             FullSchema.meta_type(:session_user)
+
+    refute :password_hash in (FullSchema.properties(:session_user) |> Enum.map(& &1.name))
+
+    assert [:id, :name, :email, :role, :inserted_at] =
+             FullSchema.properties(:session_user) |> Enum.map(& &1.name)
+  end
+
+  test "admin_user inherits all user fields and adds permissions" do
+    assert %MetaDsl.MetaType{derived_from: %MetaDsl.Derivation{kind: :extend, from: :user}} =
+             FullSchema.meta_type(:admin_user)
+
+    assert [:id, :name, :email, :password_hash, :role, :inserted_at, :permissions] =
+             FullSchema.properties(:admin_user) |> Enum.map(& &1.name)
+
+    assert %MetaDsl.Property{name: :permissions, type: {:list, :string}, required: true} =
+             List.last(FullSchema.properties(:admin_user))
+  end
+
+  # Option C — domain events
+
+  test "user_created_event carries a full user snapshot plus occurred_at" do
+    assert %MetaDsl.MetaType{derived_from: %MetaDsl.Derivation{kind: :extend, from: :user}} =
+             FullSchema.meta_type(:user_created_event)
+
+    assert [:id, :name, :email, :password_hash, :role, :inserted_at, :occurred_at] =
+             FullSchema.properties(:user_created_event) |> Enum.map(& &1.name)
+
+    assert %MetaDsl.Property{name: :occurred_at, type: :datetime, required: true} =
+             List.last(FullSchema.properties(:user_created_event))
+  end
+
+  test "user_deleted_event carries only the identity" do
+    assert %MetaDsl.MetaType{derived_from: %MetaDsl.Derivation{kind: :project, from: :user}} =
+             FullSchema.meta_type(:user_deleted_event)
+
+    assert [:id] =
+             FullSchema.properties(:user_deleted_event) |> Enum.map(& &1.name)
+  end
+
+  test "all nine types are registered" do
+    names = FullSchema.meta_types() |> Enum.map(& &1.name)
+
+    assert :user               in names
+    assert :create_user        in names
+    assert :update_user        in names
+    assert :delete_user        in names
+    assert :public_user        in names
+    assert :session_user       in names
+    assert :admin_user         in names
+    assert :user_created_event in names
+    assert :user_deleted_event in names
+  end
+
+  test "meta_types/0 returns types sorted by name" do
+    names = FullSchema.meta_types() |> Enum.map(& &1.name)
+    assert names == Enum.sort(names)
+  end
+end
+
 defmodule MetaDslValidationSingleFileTest do
   use ExUnit.Case, async: true
 

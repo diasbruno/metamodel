@@ -12,9 +12,23 @@ defmodule Metamodel.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       name: "MetaDsl",
+      description: description(),
       source_url: @source_url,
       homepage_url: @source_url,
-      docs: docs()
+      docs: docs(),
+      package: package()
+    ]
+  end
+
+  defp description do
+    "A DSL for defining generator-agnostic meta-types and deriving new types from existing ones."
+  end
+
+  defp package do
+    [
+      licenses: ["Unlicense"],
+      links: %{"GitHub" => @source_url},
+      files: ~w(lib mix.exs README.md UNLICENSE)
     ]
   end
 

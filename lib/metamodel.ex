@@ -1,6 +1,6 @@
 defmodule MetaDsl.Property do
   @moduledoc """
-  Canonical property representation used by the DSL and generators.
+  Canonical property representation used by the DSL.
 
   A `MetaDsl.Property` captures everything there is to know about a single
   field on a meta-type: its name, its type term, whether the field is
@@ -117,35 +117,6 @@ defmodule MetaDsl.MetaType do
           annotations: map(),
           derived_from: nil | MetaDsl.Derivation.t()
         }
-end
-
-defmodule MetaDsl.Generator do
-  @moduledoc """
-  Behaviour for code generators that consume resolved meta-types.
-
-  Any module that wants to act as a MetaDsl generator must adopt this
-  behaviour and implement the `c:generate/2` callback.
-
-  ## Implementing a generator
-
-      defmodule MyApp.Generators.TypeScript do
-        @behaviour MetaDsl.Generator
-
-        @impl true
-        def generate(meta_types, _opts \\\\ []) do
-          # ... render TypeScript interfaces from meta_types ...
-          {:ok, rendered}
-        end
-      end
-
-  The callback receives a list of fully resolved `MetaDsl.MetaType` structs
-  (sorted by name) and a keyword list of generator-specific options.  It
-  must return `{:ok, iodata()}` on success or `{:error, term()}` on
-  failure.
-  """
-
-  @callback generate([MetaDsl.MetaType.t()], keyword()) ::
-              {:ok, iodata()} | {:error, term()}
 end
 
 defmodule MetaDsl do
@@ -592,58 +563,5 @@ defmodule MetaDsl do
   defp expand_property!(other, _caller) do
     raise ArgumentError,
           "invalid DSL entry inside meta_type/extend_type: #{Macro.to_string(other)}"
-  end
-end
-
-defmodule MetaDsl.Generators.Debug do
-  @moduledoc """
-  Example generator that renders resolved meta-types as human-readable text.
-
-  This generator is intentionally simple — it exists to demonstrate how the
-  `MetaDsl.Generator` behaviour is implemented and to make it easy to
-  inspect a schema at a glance during development.
-
-  ## Usage
-
-      {:ok, output} = MetaDsl.Generators.Debug.generate(MyApp.Schema.meta_types())
-      IO.puts(output)
-
-  Each type is printed in the following format:
-
-      type <name>
-        origin: declared | <kind> from <source>
-        - <prop_name>: <type> (required | optional)
-        ...
-  """
-
-  @behaviour MetaDsl.Generator
-
-  @doc """
-  Renders a list of resolved `MetaDsl.MetaType` structs as plain text.
-
-  Always returns `{:ok, iodata()}`.  Accepts and ignores any `opts`.
-  """
-  @impl true
-  def generate(meta_types, _opts \\ []) do
-    rendered =
-      Enum.map_join(meta_types, "\n\n", fn type ->
-        header = "type #{type.name}"
-
-        provenance =
-          case type.derived_from do
-            nil -> "  origin: declared"
-            derivation -> "  origin: #{derivation.kind} from #{derivation.from}"
-          end
-
-        props =
-          Enum.map_join(type.properties, "\n", fn prop ->
-            req = if prop.required, do: "required", else: "optional"
-            "  - #{prop.name}: #{inspect(prop.type)} (#{req})"
-          end)
-
-        Enum.join([header, provenance, props], "\n")
-      end)
-
-    {:ok, rendered}
   end
 end

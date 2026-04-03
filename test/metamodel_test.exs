@@ -5,22 +5,24 @@ defmodule MetaDslSingleFileTest do
     use MetaDsl
 
     meta_type :user do
-      property :id, :uuid, required: true
-      property :name, :string, required: true
-      property :email, :string
+      property(:id, :uuid, required: true)
+      property(:name, :string, required: true)
+      property(:email, :string)
     end
 
-    subtype :public_user, from: :user, only: [:id, :name]
+    subtype(:public_user, from: :user, only: [:id, :name])
 
     extend_type :admin_user, from: :user do
-      property :permissions, {:list, :string}, required: true
+      property(:permissions, {:list, :string}, required: true)
     end
   end
-  
+
   test "declares and queries base meta types" do
-    assert [%MetaDsl.MetaType{name: :admin_user},
-            %MetaDsl.MetaType{name: :public_user},
-            %MetaDsl.MetaType{name: :user}] =
+    assert [
+             %MetaDsl.MetaType{name: :admin_user},
+             %MetaDsl.MetaType{name: :public_user},
+             %MetaDsl.MetaType{name: :user}
+           ] =
              BasicSchema.meta_types()
 
     assert %MetaDsl.MetaType{name: :user, derived_from: nil} = BasicSchema.meta_type(:user)
@@ -64,15 +66,6 @@ defmodule MetaDslSingleFileTest do
   test "exposes resolved representation through to_meta/0" do
     assert BasicSchema.to_meta() == BasicSchema.meta_types()
   end
-
-  test "example debug generator consumes resolved meta types" do
-    assert {:ok, output} = MetaDsl.Generators.Debug.generate(BasicSchema.meta_types())
-
-    assert output =~ "type user"
-    assert output =~ "type public_user"
-    assert output =~ "origin: project from user"
-    assert output =~ "permissions"
-  end
 end
 
 defmodule MetaDslSharedUserModelTest do
@@ -82,33 +75,33 @@ defmodule MetaDslSharedUserModelTest do
     use MetaDsl
 
     meta_type :user do
-      property :id,            :uuid,     required: true
-      property :name,          :string,   required: true
-      property :email,         :string,   required: true
-      property :password_hash, :string,   required: true
-      property :role,          :string,   required: true
-      property :inserted_at,   :datetime, required: true
+      property(:id, :uuid, required: true)
+      property(:name, :string, required: true)
+      property(:email, :string, required: true)
+      property(:password_hash, :string, required: true)
+      property(:role, :string, required: true)
+      property(:inserted_at, :datetime, required: true)
     end
 
     # Option A — CRUD input shapes
-    subtype :create_user, from: :user, except: [:id, :inserted_at]
-    subtype :update_user, from: :user, only:   [:id, :name, :email]
-    subtype :delete_user, from: :user, only:   [:id]
+    subtype(:create_user, from: :user, except: [:id, :inserted_at])
+    subtype(:update_user, from: :user, only: [:id, :name, :email])
+    subtype(:delete_user, from: :user, only: [:id])
 
     # Option B — API response shapes
-    subtype :public_user,  from: :user, only:   [:id, :name]
-    subtype :session_user, from: :user, except: [:password_hash]
+    subtype(:public_user, from: :user, only: [:id, :name])
+    subtype(:session_user, from: :user, except: [:password_hash])
 
     extend_type :admin_user, from: :user do
-      property :permissions, {:list, :string}, required: true
+      property(:permissions, {:list, :string}, required: true)
     end
 
     # Option C — domain events
     extend_type :user_created_event, from: :user do
-      property :occurred_at, :datetime, required: true
+      property(:occurred_at, :datetime, required: true)
     end
 
-    subtype :user_deleted_event, from: :user, only: [:id]
+    subtype(:user_deleted_event, from: :user, only: [:id])
   end
 
   # Option A — CRUD input shapes
@@ -186,13 +179,13 @@ defmodule MetaDslSharedUserModelTest do
   test "all nine types are registered" do
     names = FullSchema.meta_types() |> Enum.map(& &1.name)
 
-    assert :user               in names
-    assert :create_user        in names
-    assert :update_user        in names
-    assert :delete_user        in names
-    assert :public_user        in names
-    assert :session_user       in names
-    assert :admin_user         in names
+    assert :user in names
+    assert :create_user in names
+    assert :update_user in names
+    assert :delete_user in names
+    assert :public_user in names
+    assert :session_user in names
+    assert :admin_user in names
     assert :user_created_event in names
     assert :user_deleted_event in names
   end

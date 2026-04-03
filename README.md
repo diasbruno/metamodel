@@ -120,6 +120,7 @@ IO.puts(output)
 
 | Macro | `:derived_from` kind | Description |
 |---|---|---|
+| `meta_type … do … end` | `nil` | Declares a base type with no derivation |
 | `subtype …, only: [...]` | `:project` | Keep only the listed properties |
 | `subtype …, except: [...]` | `:project` | Drop the listed properties |
 | `extend_type … do … end` | `:extend` | Inherit all properties and append new ones |

@@ -128,12 +128,12 @@ defmodule MetaDsl.Generator do
 
   ## Implementing a generator
 
-      defmodule MyApp.Generators.TypeScript do
+      defmodule MyApp.Generators.Custom do
         @behaviour MetaDsl.Generator
 
         @impl true
         def generate(meta_types, _opts \\\\ []) do
-          # ... render TypeScript interfaces from meta_types ...
+          # ... render output from meta_types ...
           {:ok, rendered}
         end
       end
@@ -595,92 +595,6 @@ defmodule MetaDsl do
   end
 end
 
-defmodule MetaDsl.Generators.TypeScript do
-  @moduledoc """
-  Generator that renders resolved meta-types as TypeScript `interface`
-  declarations.
-
-  Each `MetaDsl.MetaType` becomes a TypeScript `interface` whose name is the
-  PascalCase form of the meta-type atom.  Required properties are emitted
-  without a `?`; optional properties have a `?` suffix on the key.
-
-  ## Type mapping
-
-  | MetaDsl type       | TypeScript type |
-  |--------------------|-----------------|
-  | `:string`          | `string`        |
-  | `:uuid`            | `string`        |
-  | `:integer`         | `number`        |
-  | `:float`           | `number`        |
-  | `:boolean`         | `boolean`       |
-  | `:datetime`        | `string`        |
-  | `{:list, inner}`   | `<inner>[]`     |
-  | anything else      | `unknown`       |
-
-  ## Usage
-
-  Generate all types:
-
-      {:ok, output} = MetaDsl.Generators.TypeScript.generate(MyApp.Schema.meta_types())
-
-  Generate a single type by name:
-
-      {:ok, output} =
-        MetaDsl.Generators.TypeScript.generate(MyApp.Schema.meta_types(), name: :user)
-  """
-
-  @behaviour MetaDsl.Generator
-
-  @doc """
-  Renders resolved `MetaDsl.MetaType` structs as TypeScript `interface`
-  declarations.
-
-  ## Options
-
-    * `:name` – atom name of a single type to generate.  When provided, only
-      that type is rendered.  If no type with that name exists in the list,
-      `{:ok, ""}` is returned.  When omitted, all types are rendered.
-
-  Always returns `{:ok, iodata()}`.
-  """
-  @impl true
-  def generate(meta_types, opts \\ []) do
-    types =
-      case Keyword.get(opts, :name) do
-        nil -> meta_types
-        name -> Enum.filter(meta_types, &(&1.name == name))
-      end
-
-    rendered = Enum.map_join(types, "\n\n", &render_type/1)
-    {:ok, rendered}
-  end
-
-  defp render_type(%MetaDsl.MetaType{name: name, properties: properties}) do
-    props =
-      Enum.map_join(properties, "\n", fn prop ->
-        optional = if prop.required, do: "", else: "?"
-        "  #{prop.name}#{optional}: #{ts_type(prop.type)};"
-      end)
-
-    "interface #{pascal_case(name)} {\n#{props}\n}"
-  end
-
-  defp ts_type(:string), do: "string"
-  defp ts_type(:uuid), do: "string"
-  defp ts_type(:integer), do: "number"
-  defp ts_type(:float), do: "number"
-  defp ts_type(:boolean), do: "boolean"
-  defp ts_type(:datetime), do: "string"
-  defp ts_type({:list, inner}), do: "#{ts_type(inner)}[]"
-  defp ts_type(_other), do: "unknown"
-
-  defp pascal_case(atom) do
-    atom
-    |> Atom.to_string()
-    |> String.split("_")
-    |> Enum.map_join(&String.capitalize/1)
-  end
-end
 
 defmodule MetaDsl.Generators.Elixir do
   @moduledoc """

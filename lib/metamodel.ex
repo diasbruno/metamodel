@@ -311,8 +311,11 @@ defmodule MetaDsl do
       property :role, :string, required: true
       property :score, :float, default: 0.0
   """
-  defmacro property(_name, _type), do: raise "property/2 can only be used inside meta_type or extend_type"
-  defmacro property(_name, _type, _opts), do: raise "property/3 can only be used inside meta_type or extend_type"
+  defmacro property(_name, _type),
+    do: raise("property/2 can only be used inside meta_type or extend_type")
+
+  defmacro property(_name, _type, _opts),
+    do: raise("property/3 can only be used inside meta_type or extend_type")
 
   defmacro __before_compile__(env) do
     defs = Module.get_attribute(env.module, :meta_dsl_defs) |> Enum.reverse()
@@ -417,7 +420,7 @@ defmodule MetaDsl do
     properties =
       source_type.properties
       |> select_properties!(name, opts)
-      |> then(&(validate_properties!(name, &1)))
+      |> then(&validate_properties!(name, &1))
 
     type = %MetaType{
       name: name,
@@ -436,8 +439,8 @@ defmodule MetaDsl do
     {acc, source_type} = fetch_or_resolve!(from, defs, acc, MapSet.put(visiting, name))
 
     merged_properties =
-      source_type.properties ++ extra_properties
-      |> then(&(validate_properties!(name, &1)))
+      (source_type.properties ++ extra_properties)
+      |> then(&validate_properties!(name, &1))
 
     type = %MetaType{
       name: name,
@@ -467,7 +470,8 @@ defmodule MetaDsl do
     end
   end
 
-  defp select_properties!(properties, target_name, %{only: only, except: nil}) when is_list(only) do
+  defp select_properties!(properties, target_name, %{only: only, except: nil})
+       when is_list(only) do
     names = MapSet.new(only)
 
     missing =
@@ -482,7 +486,8 @@ defmodule MetaDsl do
     Enum.filter(properties, &MapSet.member?(names, &1.name))
   end
 
-  defp select_properties!(properties, target_name, %{only: nil, except: except}) when is_list(except) do
+  defp select_properties!(properties, target_name, %{only: nil, except: except})
+       when is_list(except) do
     names = MapSet.new(except)
 
     missing =

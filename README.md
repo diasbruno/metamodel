@@ -110,10 +110,6 @@ MyApp.Schema.meta_type(:admin_user)
 # Properties of a derived type
 MyApp.Schema.properties(:session_user) |> Enum.map(& &1.name)
 #=> [:id, :name, :email, :role, :inserted_at]
-
-# Run a generator on the full schema
-{:ok, output} = MetaDsl.Generators.Debug.generate(MyApp.Schema.meta_types())
-IO.puts(output)
 ```
 
 ### Derivation kinds

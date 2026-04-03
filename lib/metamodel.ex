@@ -682,6 +682,122 @@ defmodule MetaDsl.Generators.TypeScript do
   end
 end
 
+defmodule MetaDsl.Generators.Elixir do
+  @moduledoc """
+  Generator that renders resolved meta-types as Elixir `defstruct` definitions.
+
+  Each `MetaDsl.MetaType` becomes an Elixir module containing an
+  `@enforce_keys` attribute (for required fields), a `defstruct`, and a
+  `@type t` typespec.  The module name is the PascalCase form of the
+  meta-type atom.
+
+  ## Type mapping
+
+  | MetaDsl type       | Elixir type          |
+  |--------------------|----------------------|
+  | `:string`          | `String.t()`         |
+  | `:uuid`            | `String.t()`         |
+  | `:integer`         | `integer()`          |
+  | `:float`           | `float()`            |
+  | `:boolean`         | `boolean()`          |
+  | `:datetime`        | `DateTime.t()`       |
+  | `{:list, inner}`   | `[<inner>]`          |
+  | anything else      | `term()`             |
+
+  Optional properties (i.e. `required: false`) have `| nil` appended to
+  their typespec and are given a `nil` default in the struct.
+
+  ## Usage
+
+  Generate all types:
+
+      {:ok, output} = MetaDsl.Generators.Elixir.generate(MyApp.Schema.meta_types())
+
+  Generate a single type by name:
+
+      {:ok, output} =
+        MetaDsl.Generators.Elixir.generate(MyApp.Schema.meta_types(), name: :user)
+  """
+
+  @behaviour MetaDsl.Generator
+
+  @doc """
+  Renders resolved `MetaDsl.MetaType` structs as Elixir `defstruct`
+  definitions.
+
+  ## Options
+
+    * `:name` – atom name of a single type to generate.  When provided, only
+      that type is rendered.  If no type with that name exists in the list,
+      `{:ok, ""}` is returned.  When omitted, all types are rendered.
+
+  Always returns `{:ok, iodata()}`.
+  """
+  @impl true
+  def generate(meta_types, opts \\ []) do
+    types =
+      case Keyword.get(opts, :name) do
+        nil -> meta_types
+        name -> Enum.filter(meta_types, &(&1.name == name))
+      end
+
+    rendered = Enum.map_join(types, "\n\n", &render_type/1)
+    {:ok, rendered}
+  end
+
+  defp render_type(%MetaDsl.MetaType{name: name, properties: properties}) do
+    module_name = pascal_case(name)
+    enforce_keys = properties |> Enum.filter(& &1.required) |> Enum.map(& &1.name)
+
+    struct_fields =
+      Enum.map_join(properties, ",\n", fn prop ->
+        if prop.required do
+          "    :#{prop.name}"
+        else
+          "    #{prop.name}: nil"
+        end
+      end)
+
+    typespec_fields =
+      Enum.map_join(properties, ",\n", fn prop ->
+        "    #{prop.name}: #{elixir_type(prop.type, prop.required)}"
+      end)
+
+    lines =
+      ["defmodule #{module_name} do"] ++
+        (if enforce_keys != [],
+           do: ["  @enforce_keys #{inspect(enforce_keys)}"],
+           else: []) ++
+        [
+          "  defstruct [\n#{struct_fields}\n  ]",
+          "",
+          "  @type t :: %__MODULE__{\n#{typespec_fields}\n  }",
+          "end"
+        ]
+
+    Enum.join(lines, "\n")
+  end
+
+  defp elixir_type(:string, required), do: maybe_nil("String.t()", required)
+  defp elixir_type(:uuid, required), do: maybe_nil("String.t()", required)
+  defp elixir_type(:integer, required), do: maybe_nil("integer()", required)
+  defp elixir_type(:float, required), do: maybe_nil("float()", required)
+  defp elixir_type(:boolean, required), do: maybe_nil("boolean()", required)
+  defp elixir_type(:datetime, required), do: maybe_nil("DateTime.t()", required)
+  defp elixir_type({:list, inner}, required), do: maybe_nil("[#{elixir_type(inner, true)}]", required)
+  defp elixir_type(_other, required), do: maybe_nil("term()", required)
+
+  defp maybe_nil(type, true), do: type
+  defp maybe_nil(type, false), do: "#{type} | nil"
+
+  defp pascal_case(atom) do
+    atom
+    |> Atom.to_string()
+    |> String.split("_")
+    |> Enum.map_join(&String.capitalize/1)
+  end
+end
+
 defmodule MetaDsl.Generators.Debug do
   @moduledoc """
   Example generator that renders resolved meta-types as human-readable text.

@@ -392,3 +392,113 @@ defmodule MetaDslTypeScriptGeneratorTest do
     assert output =~ "interface User {"
   end
 end
+
+defmodule MetaDslElixirGeneratorTest do
+  use ExUnit.Case, async: true
+
+  defmodule Schema do
+    use MetaDsl
+
+    meta_type :user do
+      property :id,          :uuid,    required: true
+      property :name,        :string,  required: true
+      property :score,       :float
+      property :active,      :boolean
+      property :age,         :integer
+      property :inserted_at, :datetime
+    end
+
+    subtype :public_user, from: :user, only: [:id, :name]
+
+    extend_type :admin_user, from: :user do
+      property :permissions, {:list, :string}, required: true
+    end
+  end
+
+  test "generates Elixir structs for all types" do
+    assert {:ok, output} = MetaDsl.Generators.Elixir.generate(Schema.meta_types())
+
+    assert output =~ "defmodule AdminUser do"
+    assert output =~ "defmodule PublicUser do"
+    assert output =~ "defmodule User do"
+  end
+
+  test "generates a single Elixir struct when :name option is given" do
+    assert {:ok, output} =
+             MetaDsl.Generators.Elixir.generate(Schema.meta_types(), name: :user)
+
+    assert output =~ "defmodule User do"
+    refute output =~ "defmodule AdminUser do"
+    refute output =~ "defmodule PublicUser do"
+  end
+
+  test "returns empty string for an unknown :name option" do
+    assert {:ok, ""} =
+             MetaDsl.Generators.Elixir.generate(Schema.meta_types(), name: :missing)
+  end
+
+  test "required properties appear in @enforce_keys" do
+    assert {:ok, output} =
+             MetaDsl.Generators.Elixir.generate(Schema.meta_types(), name: :user)
+
+    assert output =~ "@enforce_keys [:id, :name]"
+  end
+
+  test "optional properties have nil defaults in defstruct" do
+    assert {:ok, output} =
+             MetaDsl.Generators.Elixir.generate(Schema.meta_types(), name: :user)
+
+    assert output =~ "score: nil"
+    assert output =~ "active: nil"
+    assert output =~ "age: nil"
+    assert output =~ "inserted_at: nil"
+  end
+
+  test "required properties have no default in defstruct" do
+    assert {:ok, output} =
+             MetaDsl.Generators.Elixir.generate(Schema.meta_types(), name: :user)
+
+    assert output =~ ":id"
+    assert output =~ ":name"
+    refute output =~ "id: nil"
+    refute output =~ "name: nil"
+  end
+
+  test "maps list types to Elixir list syntax in typespec" do
+    assert {:ok, output} =
+             MetaDsl.Generators.Elixir.generate(Schema.meta_types(), name: :admin_user)
+
+    assert output =~ "permissions: [String.t()]"
+  end
+
+  test "generates typespec with correct types for optional fields" do
+    assert {:ok, output} =
+             MetaDsl.Generators.Elixir.generate(Schema.meta_types(), name: :user)
+
+    assert output =~ "id: String.t()"
+    assert output =~ "name: String.t()"
+    assert output =~ "score: float() | nil"
+    assert output =~ "active: boolean() | nil"
+    assert output =~ "age: integer() | nil"
+    assert output =~ "inserted_at: DateTime.t() | nil"
+  end
+
+  test "generates a subtype with only the projected properties" do
+    assert {:ok, output} =
+             MetaDsl.Generators.Elixir.generate(Schema.meta_types(), name: :public_user)
+
+    assert output =~ "defmodule PublicUser do"
+    assert output =~ ":id"
+    assert output =~ ":name"
+    refute output =~ "score"
+    refute output =~ "active"
+  end
+
+  test "converts snake_case atom names to PascalCase module names" do
+    assert {:ok, output} = MetaDsl.Generators.Elixir.generate(Schema.meta_types())
+
+    assert output =~ "defmodule AdminUser do"
+    assert output =~ "defmodule PublicUser do"
+    assert output =~ "defmodule User do"
+  end
+end

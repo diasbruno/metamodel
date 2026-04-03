@@ -55,7 +55,7 @@ defmodule Metamodel.MixProject do
       groups_for_modules: [
         "Core DSL": [MetaDsl],
         "Data Structures": [MetaDsl.MetaType, MetaDsl.Property, MetaDsl.Derivation],
-        Generators: [MetaDsl.Generator, MetaDsl.Generators.Debug, MetaDsl.Generators.TypeScript]
+        Generators: [MetaDsl.Generator, MetaDsl.Generators.Debug, MetaDsl.Generators.Elixir, MetaDsl.Generators.TypeScript]
       ]
     ]
   end

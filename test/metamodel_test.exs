@@ -303,3 +303,92 @@ defmodule MetaDslValidationSingleFileTest do
     end
   end
 end
+
+defmodule MetaDslTypeScriptGeneratorTest do
+  use ExUnit.Case, async: true
+
+  defmodule Schema do
+    use MetaDsl
+
+    meta_type :user do
+      property :id,          :uuid,    required: true
+      property :name,        :string,  required: true
+      property :score,       :float
+      property :active,      :boolean
+      property :age,         :integer
+      property :inserted_at, :datetime
+    end
+
+    subtype :public_user, from: :user, only: [:id, :name]
+
+    extend_type :admin_user, from: :user do
+      property :permissions, {:list, :string}, required: true
+    end
+  end
+
+  test "generates TypeScript interfaces for all types" do
+    assert {:ok, output} = MetaDsl.Generators.TypeScript.generate(Schema.meta_types())
+
+    assert output =~ "interface AdminUser {"
+    assert output =~ "interface PublicUser {"
+    assert output =~ "interface User {"
+  end
+
+  test "generates a single TypeScript interface when :name option is given" do
+    assert {:ok, output} =
+             MetaDsl.Generators.TypeScript.generate(Schema.meta_types(), name: :user)
+
+    assert output =~ "interface User {"
+    refute output =~ "interface AdminUser {"
+    refute output =~ "interface PublicUser {"
+  end
+
+  test "returns empty string for an unknown :name option" do
+    assert {:ok, ""} =
+             MetaDsl.Generators.TypeScript.generate(Schema.meta_types(), name: :missing)
+  end
+
+  test "required properties have no question mark" do
+    assert {:ok, output} =
+             MetaDsl.Generators.TypeScript.generate(Schema.meta_types(), name: :user)
+
+    assert output =~ "  id: string;"
+    assert output =~ "  name: string;"
+  end
+
+  test "optional properties have a question mark suffix on the key" do
+    assert {:ok, output} =
+             MetaDsl.Generators.TypeScript.generate(Schema.meta_types(), name: :user)
+
+    assert output =~ "  score?: number;"
+    assert output =~ "  active?: boolean;"
+    assert output =~ "  age?: number;"
+    assert output =~ "  inserted_at?: string;"
+  end
+
+  test "maps list types to TypeScript array syntax" do
+    assert {:ok, output} =
+             MetaDsl.Generators.TypeScript.generate(Schema.meta_types(), name: :admin_user)
+
+    assert output =~ "  permissions: string[];"
+  end
+
+  test "generates a subtype with only the projected properties" do
+    assert {:ok, output} =
+             MetaDsl.Generators.TypeScript.generate(Schema.meta_types(), name: :public_user)
+
+    assert output =~ "interface PublicUser {"
+    assert output =~ "  id: string;"
+    assert output =~ "  name: string;"
+    refute output =~ "score"
+    refute output =~ "active"
+  end
+
+  test "converts snake_case atom names to PascalCase interface names" do
+    assert {:ok, output} = MetaDsl.Generators.TypeScript.generate(Schema.meta_types())
+
+    assert output =~ "interface AdminUser {"
+    assert output =~ "interface PublicUser {"
+    assert output =~ "interface User {"
+  end
+end

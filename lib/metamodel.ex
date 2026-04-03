@@ -121,7 +121,7 @@ end
 
 defmodule MetaDsl.Generator do
   @moduledoc """
-  Behaviour for code generators that consume resolved meta-types.
+  Behaviour and utilities for code generators that consume resolved meta-types.
 
   Any module that wants to act as a MetaDsl generator must adopt this
   behaviour and implement the `c:generate/2` callback.
@@ -142,10 +142,77 @@ defmodule MetaDsl.Generator do
   (sorted by name) and a keyword list of generator-specific options.  It
   must return `{:ok, iodata()}` on success or `{:error, term()}` on
   failure.
+
+  ## Choosing an output mode
+
+  Once a generator has produced its output you can direct it to one of two
+  destinations:
+
+    * **Compile** — pass the generated Elixir source to the Elixir compiler
+      so that the resulting modules are immediately available in the runtime:
+
+          {:ok, modules} =
+            MetaDsl.Generator.compile(MyApp.Generators.Structs, schema.meta_types())
+
+    * **File** — write the generated source (or any other text) to a path on
+      disk so that it can be committed, formatted, or compiled later:
+
+          :ok =
+            MetaDsl.Generator.to_file(MyApp.Generators.Structs, schema.meta_types(), "lib/generated.ex")
+
+  Both helpers delegate to `generate/2` internally and propagate any
+  `{:error, reason}` the generator returns.
   """
 
   @callback generate([MetaDsl.MetaType.t()], keyword()) ::
               {:ok, iodata()} | {:error, term()}
+
+  @doc """
+  Runs `generator_module.generate/2` and compiles the resulting Elixir source.
+
+  The iodata returned by the generator is converted to a binary and passed to
+  `Code.compile_string/2`.  On success the list of `{module, binary}` tuples
+  produced by the compiler is returned inside `{:ok, ...}`.
+
+  ## Examples
+
+      {:ok, modules} =
+        MetaDsl.Generator.compile(MetaDsl.Generators.Debug, schema.meta_types())
+
+  """
+  @spec compile(module(), [MetaDsl.MetaType.t()], keyword()) ::
+          {:ok, [{module(), binary()}]} | {:error, term()}
+  def compile(generator_module, meta_types, opts \\ []) do
+    with {:ok, code} <- generator_module.generate(meta_types, opts) do
+      {:ok, Code.compile_string(IO.iodata_to_binary(code))}
+    end
+  end
+
+  @doc """
+  Runs `generator_module.generate/2` and writes the output to `path`.
+
+  The iodata returned by the generator is written atomically to the given
+  file path using `File.write/2`.  Returns `:ok` on success or
+  `{:error, reason}` on failure (either from the generator or from the file
+  system).
+
+  ## Examples
+
+      :ok =
+        MetaDsl.Generator.to_file(
+          MetaDsl.Generators.Debug,
+          schema.meta_types(),
+          "priv/schema_debug.txt"
+        )
+
+  """
+  @spec to_file(module(), [MetaDsl.MetaType.t()], Path.t(), keyword()) ::
+          :ok | {:error, term()}
+  def to_file(generator_module, meta_types, path, opts \\ []) do
+    with {:ok, code} <- generator_module.generate(meta_types, opts) do
+      File.write(path, code)
+    end
+  end
 end
 
 defmodule MetaDsl do

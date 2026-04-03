@@ -303,3 +303,90 @@ defmodule MetaDslValidationSingleFileTest do
     end
   end
 end
+
+defmodule MetaDslGeneratorOutputTest do
+  use ExUnit.Case, async: true
+
+  # A minimal generator that emits a valid Elixir module definition so that
+  # compile/3 can be exercised end-to-end.
+  defmodule ElixirModuleGenerator do
+    @behaviour MetaDsl.Generator
+
+    @impl true
+    def generate(meta_types, _opts \\ []) do
+      body =
+        Enum.map_join(meta_types, "\n", fn t ->
+          "  def #{t.name}, do: #{inspect(t.name)}"
+        end)
+
+      code = "defmodule MetaDslGeneratorOutputTest.Generated do\n#{body}\nend\n"
+      {:ok, code}
+    end
+  end
+
+  defmodule SimpleSchema do
+    use MetaDsl
+
+    meta_type :widget do
+      property :id, :uuid, required: true
+      property :label, :string
+    end
+
+    subtype :slim_widget, from: :widget, only: [:id]
+  end
+
+  test "compile/3 compiles generator output into live Elixir modules" do
+    assert {:ok, modules} =
+             MetaDsl.Generator.compile(ElixirModuleGenerator, SimpleSchema.meta_types())
+
+    assert Enum.any?(modules, fn {mod, _bin} -> mod == MetaDslGeneratorOutputTest.Generated end)
+    assert MetaDslGeneratorOutputTest.Generated.widget() == :widget
+    assert MetaDslGeneratorOutputTest.Generated.slim_widget() == :slim_widget
+  end
+
+  test "compile/3 propagates generator errors" do
+    defmodule FailingGenerator do
+      @behaviour MetaDsl.Generator
+      @impl true
+      def generate(_meta_types, _opts), do: {:error, "something went wrong"}
+    end
+
+    assert {:error, "something went wrong"} =
+             MetaDsl.Generator.compile(FailingGenerator, SimpleSchema.meta_types())
+  end
+
+  test "to_file/4 writes generator output to a file" do
+    path = Path.join(System.tmp_dir!(), "metamodel_test_#{System.unique_integer()}.txt")
+
+    on_exit(fn -> File.rm(path) end)
+
+    assert :ok =
+             MetaDsl.Generator.to_file(
+               MetaDsl.Generators.Debug,
+               SimpleSchema.meta_types(),
+               path
+             )
+
+    content = File.read!(path)
+    assert content =~ "type widget"
+    assert content =~ "type slim_widget"
+    assert content =~ "origin: project from widget"
+  end
+
+  test "to_file/4 propagates generator errors" do
+    defmodule AnotherFailingGenerator do
+      @behaviour MetaDsl.Generator
+      @impl true
+      def generate(_meta_types, _opts), do: {:error, :bad_input}
+    end
+
+    assert {:error, :bad_input} =
+             MetaDsl.Generator.to_file(
+               AnotherFailingGenerator,
+               SimpleSchema.meta_types(),
+               Path.join(System.tmp_dir!(), "should_not_be_created.txt")
+             )
+
+    refute File.exists?(Path.join(System.tmp_dir!(), "should_not_be_created.txt"))
+  end
+end

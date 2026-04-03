@@ -1,13 +1,20 @@
 defmodule Metamodel.MixProject do
   use Mix.Project
 
+  @source_url "https://github.com/diasbruno/metamodel"
+  @version "0.1.0"
+
   def project do
     [
       app: :metamodel,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      name: "MetaDsl",
+      source_url: @source_url,
+      homepage_url: @source_url,
+      docs: docs()
     ]
   end
 
@@ -21,8 +28,21 @@ defmodule Metamodel.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      {:ex_doc, "~> 0.36", only: :dev, runtime: false}
+    ]
+  end
+
+  defp docs do
+    [
+      main: "MetaDsl",
+      source_ref: "v#{@version}",
+      source_url: @source_url,
+      extras: ["README.md"],
+      groups_for_modules: [
+        "Core DSL": [MetaDsl],
+        "Data Structures": [MetaDsl.MetaType, MetaDsl.Property, MetaDsl.Derivation],
+        Generators: [MetaDsl.Generator, MetaDsl.Generators.Debug]
+      ]
     ]
   end
 end

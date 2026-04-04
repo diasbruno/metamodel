@@ -1,7 +1,7 @@
-defmodule MetaDsl.Generators.ElixirStructsTest do
+defmodule MetaDsl.ElixirStructsTest do
   use ExUnit.Case, async: true
 
-  alias MetaDsl.Generators.ElixirStructs
+  alias MetaDsl.ElixirStructs
   alias MetaDsl.{MetaType, Property}
 
   defp prop(name, type, opts \\ []) do
@@ -138,7 +138,7 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
   end
 
   # ---------------------------------------------------------------------------
-  # use MetaDsl.Generators.ElixirStructs (compile-time macro)
+  # use MetaDsl.ElixirStructs (compile-time macro)
   # ---------------------------------------------------------------------------
 
   defmodule CompileTimeSchema do
@@ -159,21 +159,21 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
 
   # All types — structs are nested in this module's namespace.
   defmodule CompileTimeStructs do
-    use MetaDsl.Generators.ElixirStructs,
-      schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema
+    use MetaDsl.ElixirStructs,
+      schema: MetaDsl.ElixirStructsTest.CompileTimeSchema
   end
 
   # Single type via type: atom
   defmodule SingleTypeStructs do
-    use MetaDsl.Generators.ElixirStructs,
-      schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema,
+    use MetaDsl.ElixirStructs,
+      schema: MetaDsl.ElixirStructsTest.CompileTimeSchema,
       type: :ct_user
   end
 
   # Subset via type: list
   defmodule SubsetStructs do
-    use MetaDsl.Generators.ElixirStructs,
-      schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema,
+    use MetaDsl.ElixirStructs,
+      schema: MetaDsl.ElixirStructsTest.CompileTimeSchema,
       type: [:ct_user, :ct_public_user]
   end
 
@@ -223,8 +223,8 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
     assert_raise ArgumentError, ~r/unknown type :nonexistent/, fn ->
       Code.compile_string("""
       defmodule BadSingleTypeStructs do
-        use MetaDsl.Generators.ElixirStructs,
-          schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema,
+        use MetaDsl.ElixirStructs,
+          schema: MetaDsl.ElixirStructsTest.CompileTimeSchema,
           type: :nonexistent
       end
       """)
@@ -235,8 +235,8 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
     assert_raise ArgumentError, ~r/unknown types \[:missing_a, :missing_b\]/, fn ->
       Code.compile_string("""
       defmodule BadSubsetStructs do
-        use MetaDsl.Generators.ElixirStructs,
-          schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema,
+        use MetaDsl.ElixirStructs,
+          schema: MetaDsl.ElixirStructsTest.CompileTimeSchema,
           type: [:ct_user, :missing_a, :missing_b]
       end
       """)

@@ -1,4 +1,4 @@
-defmodule MetaDsl.Generators.ElixirStructs do
+defmodule MetaDsl.ElixirStructs do
   @moduledoc """
   Generator that produces Elixir struct module definitions from MetaDsl
   meta-types.
@@ -33,26 +33,26 @@ defmodule MetaDsl.Generators.ElixirStructs do
 
       # All types — defines MyApp.Structs.User and MyApp.Structs.PublicUser
       defmodule MyApp.Structs do
-        use MetaDsl.Generators.ElixirStructs, schema: MyApp.Schema
+        use MetaDsl.ElixirStructs, schema: MyApp.Schema
       end
 
       # Single type — defines MyApp.Structs.User only
       defmodule MyApp.Structs do
-        use MetaDsl.Generators.ElixirStructs, schema: MyApp.Schema, type: :user
+        use MetaDsl.ElixirStructs, schema: MyApp.Schema, type: :user
       end
 
       # Subset of types
       defmodule MyApp.Structs do
-        use MetaDsl.Generators.ElixirStructs, schema: MyApp.Schema, type: [:user, :public_user]
+        use MetaDsl.ElixirStructs, schema: MyApp.Schema, type: [:user, :public_user]
       end
 
   ## Functional usage
 
       # All types at once — returns a list of quoted expressions
-      asts = MyApp.Schema.meta_types() |> MetaDsl.Generators.ElixirStructs.generate()
+      asts = MyApp.Schema.meta_types() |> MetaDsl.ElixirStructs.generate()
 
       # Single type — returns a single quoted expression
-      ast = MyApp.Schema.meta_type(:user) |> MetaDsl.Generators.ElixirStructs.generate()
+      ast = MyApp.Schema.meta_type(:user) |> MetaDsl.ElixirStructs.generate()
   """
 
   @doc """
@@ -94,7 +94,7 @@ defmodule MetaDsl.Generators.ElixirStructs do
           case Enum.find(all_types, &(&1.name == name)) do
             nil ->
               raise ArgumentError,
-                    "MetaDsl.Generators.ElixirStructs: unknown type #{inspect(name)} in schema #{inspect(schema_module)}"
+                    "MetaDsl.ElixirStructs: unknown type #{inspect(name)} in schema #{inspect(schema_module)}"
 
             type ->
               [type]
@@ -106,7 +106,7 @@ defmodule MetaDsl.Generators.ElixirStructs do
 
           if missing != [] do
             raise ArgumentError,
-                  "MetaDsl.Generators.ElixirStructs: unknown types #{inspect(missing)} in schema #{inspect(schema_module)}"
+                  "MetaDsl.ElixirStructs: unknown types #{inspect(missing)} in schema #{inspect(schema_module)}"
           end
 
           Enum.filter(all_types, &(&1.name in names))

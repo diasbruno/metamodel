@@ -239,12 +239,14 @@ defmodule MetaDsl.Validation do
 
   # When the annotation value is an actual function (functional-usage path),
   # serialize it to a binary literal so it can be embedded in generated AST.
-  # Any Erlang term, including anonymous function closures, can be serialised
+  # Any Erlang term, including anonymous function closures, can be serialized
   # with :erlang.term_to_binary and restored with :erlang.binary_to_term.
+  # The :safe option restricts deserialization to atoms already in the table,
+  # preventing atom exhaustion attacks if the binary were ever tampered with.
   # When the value is already an AST node (DSL macro path), use it directly.
   defp quote_validator(validator) when is_function(validator) do
     binary = :erlang.term_to_binary(validator)
-    quote do: :erlang.binary_to_term(unquote(binary))
+    quote do: :erlang.binary_to_term(unquote(binary), [:safe])
   end
 
   defp quote_validator(validator), do: validator

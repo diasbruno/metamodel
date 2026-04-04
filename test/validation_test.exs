@@ -5,12 +5,14 @@ defmodule MetaDsl.ValidationTest do
   alias MetaDsl.{MetaType, Property}
 
   defp prop(name, type, opts \\ []) do
+    {validate, opts} = Keyword.pop(opts, :validate)
+
     %Property{
       name: name,
       type: type,
       required: Keyword.get(opts, :required, false),
       default: Keyword.get(opts, :default, nil),
-      annotations: %{}
+      annotations: if(validate, do: %{validate: validate}, else: %{})
     }
   end
 
@@ -208,6 +210,106 @@ defmodule MetaDsl.ValidationTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Custom validators via :validate annotation
+  # ---------------------------------------------------------------------------
+
+  test "custom validator returning :ok marks the field as valid" do
+    types = [
+      %MetaType{
+        name: :val_custom_ok,
+        properties: [prop(:code, :string, validate: fn _v -> :ok end)]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, _} = ValCustomOk.validate(%{code: "anything"})
+    assert {:ok, _} = ValCustomOk.validate(%{code: nil})
+  end
+
+  test "custom validator returning {:error, reason} includes reason in errors" do
+    validator = fn v ->
+      if is_binary(v) and String.length(v) == 3,
+        do: :ok,
+        else: {:error, "must be 3 characters"}
+    end
+
+    types = [
+      %MetaType{
+        name: :val_custom_error,
+        properties: [prop(:code, :string, validate: validator)]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, _} = ValCustomError.validate(%{code: "ABC"})
+    assert {:error, [{:code, "must be 3 characters"}]} = ValCustomError.validate(%{code: "AB"})
+    assert {:error, [{:code, "must be 3 characters"}]} = ValCustomError.validate(%{code: nil})
+  end
+
+  test "custom validator returning true/false uses default 'is invalid' message" do
+    types = [
+      %MetaType{
+        name: :val_bool_validator,
+        properties: [prop(:score, :integer, validate: fn v -> is_integer(v) and v >= 0 end)]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, _} = ValBoolValidator.validate(%{score: 5})
+    assert {:error, [{:score, "is invalid"}]} = ValBoolValidator.validate(%{score: -1})
+    assert {:error, [{:score, "is invalid"}]} = ValBoolValidator.validate(%{score: nil})
+  end
+
+  test "required field with custom validator: nil yields 'is required', not custom error" do
+    validator = fn v ->
+      if is_binary(v) and String.length(v) > 0, do: :ok, else: {:error, "must be non-empty"}
+    end
+
+    types = [
+      %MetaType{
+        name: :val_required_with_custom,
+        properties: [prop(:name, :string, required: true, validate: validator)]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, _} = ValRequiredWithCustom.validate(%{name: "Alice"})
+    assert {:error, [{:name, "is required"}]} = ValRequiredWithCustom.validate(%{name: nil})
+    assert {:error, [{:name, "must be non-empty"}]} = ValRequiredWithCustom.validate(%{name: ""})
+  end
+
+  test "multiple properties with mixed validators accumulate errors in order" do
+    types = [
+      %MetaType{
+        name: :val_multi_validators,
+        properties: [
+          prop(:id, :string, required: true),
+          prop(:code, :string,
+            validate: fn v -> if v == "ok", do: :ok, else: {:error, "bad code"} end
+          ),
+          prop(:count, :integer, required: true)
+        ]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, _} = ValMultiValidators.validate(%{id: "1", code: "ok", count: 3})
+
+    assert {:error, [{:id, "is required"}, {:code, "bad code"}, {:count, "is required"}]} =
+             ValMultiValidators.validate(%{id: nil, code: "bad", count: nil})
+  end
+
+  # ---------------------------------------------------------------------------
   # use MetaDsl.Validation (compile-time macro)
   # ---------------------------------------------------------------------------
 
@@ -227,10 +329,29 @@ defmodule MetaDsl.ValidationTest do
     end
   end
 
+  defmodule CompileTimeSchemaWithValidator do
+    use MetaDsl
+
+    meta_type :val_item do
+      property(:code, :string,
+        required: true,
+        validate: fn v ->
+          if is_binary(v) and String.length(v) == 3, do: :ok, else: {:error, "must be 3 chars"}
+        end
+      )
+      property(:count, :integer)
+    end
+  end
+
   # All types — validators are nested in this module's namespace.
   defmodule CompileTimeValidators do
     use MetaDsl.Validation,
       schema: MetaDsl.ValidationTest.CompileTimeSchema
+  end
+
+  defmodule CompileTimeValidatorsWithAnnotation do
+    use MetaDsl.Validation,
+      schema: MetaDsl.ValidationTest.CompileTimeSchemaWithValidator
   end
 
   # Single type via type: atom
@@ -279,6 +400,17 @@ defmodule MetaDsl.ValidationTest do
              CompileTimeValidators.ValAdminUser.validate(%{id: "1", name: "Alice"})
 
     assert {:permissions, "is required"} in errors
+  end
+
+  test "use macro picks up :validate annotation from DSL property declaration" do
+    assert {:ok, _} =
+             CompileTimeValidatorsWithAnnotation.ValItem.validate(%{code: "ABC", count: 1})
+
+    assert {:error, [{:code, "is required"}]} =
+             CompileTimeValidatorsWithAnnotation.ValItem.validate(%{code: nil})
+
+    assert {:error, [{:code, "must be 3 chars"}]} =
+             CompileTimeValidatorsWithAnnotation.ValItem.validate(%{code: "AB"})
   end
 
   test "use macro with type: atom generates only the specified type" do

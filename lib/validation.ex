@@ -9,9 +9,37 @@ defmodule MetaDsl.Validation do
   inside whichever module calls the generator.
 
   Each generated module exposes a single `validate/1` function that accepts a
-  map or struct and returns `{:ok, data}` when all required fields are present
-  and non-`nil`, or `{:error, errors}` where `errors` is a list of
-  `{field, reason}` tuples for every required field that is missing.
+  map or struct and returns `{:ok, data}` when all field validations pass, or
+  `{:error, errors}` where `errors` is a list of `{field, reason}` tuples in
+  property-declaration order.
+
+  ## Custom validators
+
+  Each property can carry a `:validate` annotation with a function that
+  accepts the field value and returns one of:
+
+    * `:ok`, `{:ok, _}`, or `true` — the value is valid.
+    * `{:error, reason}` — the value is invalid; `reason` is included in the
+      error tuple.
+    * `false` — the value is invalid; the default `"is invalid"` message is
+      used.
+
+  The annotation is an extra option on the `property` declaration:
+
+      meta_type :user do
+        property :email, :string, validate: fn v ->
+          if is_binary(v) and String.contains?(v, "@"),
+            do: :ok,
+            else: {:error, "must be a valid email"}
+        end
+      end
+
+  When a property has both `required: true` and a `:validate` annotation, the
+  nil-presence check runs first; the custom validator is only called when the
+  value is non-`nil`.
+
+  When no `:validate` annotation is present, the only check for required fields
+  is the nil-presence check.
 
   ## Compile-time usage via `use`
 
@@ -126,29 +154,100 @@ defmodule MetaDsl.Validation do
 
   defp generate_validator(%MetaDsl.MetaType{name: name, properties: properties}, namespace) do
     module_name = build_module_name(name, namespace)
-    required_fields = properties |> Enum.filter(& &1.required) |> Enum.map(& &1.name)
+    errors_var = Macro.var(:errors, nil)
+    data_var = Macro.var(:data, nil)
+
+    checks =
+      properties
+      |> Enum.map(&property_check_ast(&1, errors_var, data_var))
+      |> Enum.reject(&is_nil/1)
 
     quote do
       defmodule unquote(module_name) do
-        def validate(data) do
-          errors =
-            Enum.reduce(unquote(required_fields), [], fn field, acc ->
-              if Map.get(data, field) == nil do
-                [{field, "is required"} | acc]
-              else
-                acc
-              end
-            end)
+        def validate(unquote(data_var)) do
+          unquote(errors_var) = []
+          unquote_splicing(checks)
 
-          if errors == [] do
-            {:ok, data}
+          if unquote(errors_var) == [] do
+            {:ok, unquote(data_var)}
           else
-            {:error, Enum.reverse(errors)}
+            {:error, Enum.reverse(unquote(errors_var))}
           end
         end
       end
     end
   end
+
+  # Builds a single AST statement that updates `errors_var` for one property.
+  # Returns nil when no validation is needed (optional field, no custom validator).
+  defp property_check_ast(
+         %MetaDsl.Property{name: field, required: required, annotations: annotations},
+         errors_var,
+         data_var
+       ) do
+    validator = Map.get(annotations, :validate)
+    quoted_validator = quote_validator(validator)
+
+    cond do
+      validator != nil && required ->
+        # Nil-presence check first; custom validator runs only on non-nil values.
+        quote do
+          unquote(errors_var) =
+            case Map.get(unquote(data_var), unquote(field)) do
+              nil ->
+                [{unquote(field), "is required"} | unquote(errors_var)]
+
+              value ->
+                case unquote(quoted_validator).(value) do
+                  :ok -> unquote(errors_var)
+                  {:ok, _} -> unquote(errors_var)
+                  true -> unquote(errors_var)
+                  false -> [{unquote(field), "is invalid"} | unquote(errors_var)]
+                  {:error, reason} -> [{unquote(field), reason} | unquote(errors_var)]
+                end
+            end
+        end
+
+      validator != nil ->
+        # Optional field with a custom validator — always call the validator.
+        quote do
+          unquote(errors_var) =
+            case unquote(quoted_validator).(Map.get(unquote(data_var), unquote(field))) do
+              :ok -> unquote(errors_var)
+              {:ok, _} -> unquote(errors_var)
+              true -> unquote(errors_var)
+              false -> [{unquote(field), "is invalid"} | unquote(errors_var)]
+              {:error, reason} -> [{unquote(field), reason} | unquote(errors_var)]
+            end
+        end
+
+      required ->
+        # Required field, no custom validator — nil-presence check only.
+        quote do
+          unquote(errors_var) =
+            if Map.get(unquote(data_var), unquote(field)) == nil do
+              [{unquote(field), "is required"} | unquote(errors_var)]
+            else
+              unquote(errors_var)
+            end
+        end
+
+      true ->
+        nil
+    end
+  end
+
+  # When the annotation value is an actual function (functional-usage path),
+  # serialize it to a binary literal so it can be embedded in generated AST.
+  # Any Erlang term, including anonymous function closures, can be serialised
+  # with :erlang.term_to_binary and restored with :erlang.binary_to_term.
+  # When the value is already an AST node (DSL macro path), use it directly.
+  defp quote_validator(validator) when is_function(validator) do
+    binary = :erlang.term_to_binary(validator)
+    quote do: :erlang.binary_to_term(unquote(binary))
+  end
+
+  defp quote_validator(validator), do: validator
 
   defp build_module_name(name, nil) do
     name

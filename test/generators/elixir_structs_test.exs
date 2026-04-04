@@ -218,4 +218,28 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
     assert function_exported?(SubsetStructs.CtPublicUser, :__struct__, 0)
     refute function_exported?(SubsetStructs.CtAdminUser, :__struct__, 0)
   end
+
+  test "use macro raises at compile time for unknown type: atom" do
+    assert_raise ArgumentError, ~r/unknown type :nonexistent/, fn ->
+      Code.compile_string("""
+      defmodule BadSingleTypeStructs do
+        use MetaDsl.Generators.ElixirStructs,
+          schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema,
+          type: :nonexistent
+      end
+      """)
+    end
+  end
+
+  test "use macro raises at compile time for unknown type: list entries" do
+    assert_raise ArgumentError, ~r/unknown types \[:missing_a, :missing_b\]/, fn ->
+      Code.compile_string("""
+      defmodule BadSubsetStructs do
+        use MetaDsl.Generators.ElixirStructs,
+          schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema,
+          type: [:ct_user, :missing_a, :missing_b]
+      end
+      """)
+    end
+  end
 end

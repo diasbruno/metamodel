@@ -87,9 +87,29 @@ defmodule MetaDsl.Generators.ElixirStructs do
 
     types =
       case type_filter do
-        nil -> all_types
-        name when is_atom(name) -> Enum.filter(all_types, &(&1.name == name))
-        names when is_list(names) -> Enum.filter(all_types, &(&1.name in names))
+        nil ->
+          all_types
+
+        name when is_atom(name) ->
+          case Enum.find(all_types, &(&1.name == name)) do
+            nil ->
+              raise ArgumentError,
+                    "MetaDsl.Generators.ElixirStructs: unknown type #{inspect(name)} in schema #{inspect(schema_module)}"
+
+            type ->
+              [type]
+          end
+
+        names when is_list(names) ->
+          known = MapSet.new(all_types, & &1.name)
+          missing = Enum.reject(names, &MapSet.member?(known, &1))
+
+          if missing != [] do
+            raise ArgumentError,
+                  "MetaDsl.Generators.ElixirStructs: unknown types #{inspect(missing)} in schema #{inspect(schema_module)}"
+          end
+
+          Enum.filter(all_types, &(&1.name in names))
       end
 
     asts = Enum.map(types, &generate_struct(&1, namespace))

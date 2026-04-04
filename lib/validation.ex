@@ -9,9 +9,14 @@ defmodule MetaDsl.Validation do
   inside whichever module calls the generator.
 
   Each generated module exposes a single `validate/1` function that accepts a
-  map or struct and returns `{:ok, data}` when all field validations pass, or
-  `{:error, errors}` where `errors` is a list of `{field, reason}` tuples in
-  property-declaration order.
+  map or struct.  On success it returns `{:ok, instance}` where `instance` is a
+  struct of the generated module populated with the validated fields.  On
+  failure it returns `{:error, errors}` where `errors` is a list of
+  `{field, reason}` tuples in property-declaration order.
+
+  Each generated module also defines a `defstruct` with the same fields as the
+  meta-type (required fields become `@enforce_keys`), so the module serves as
+  both the validator and the typed struct for the type.
 
   ## Custom validators
 
@@ -77,6 +82,23 @@ defmodule MetaDsl.Validation do
   When a property has both `required: true` and a `:validate` annotation, the
   nil-presence check runs first; the custom validator is only called when the
   value is non-`nil`.
+
+  ## Custom error messages
+
+  Each property can carry a `:message` annotation to override the default error
+  strings that the generator uses.  The custom message replaces:
+
+    * `"is required"` — emitted when a `required: true` field is `nil`.
+    * `"is invalid"` — emitted when a custom validator returns `false`.
+
+  Messages returned directly by a validator as `{:error, reason}` are always
+  used as-is; `:message` does not affect them.
+
+      meta_type :user do
+        property :id,    :uuid,   required: true,  message: "ID is required"
+        property :email, :string, validate: &MyApp.Validators.valid_email?/1,
+                                  message: "Email is not valid"
+      end
 
   ## Compile-time usage via `use`
 
@@ -193,20 +215,41 @@ defmodule MetaDsl.Validation do
     module_name = build_module_name(name, namespace)
     errors_var = Macro.var(:errors, nil)
     data_var = Macro.var(:data, nil)
+    enforce_keys = properties |> Enum.filter(& &1.required) |> Enum.map(& &1.name)
+    field_names = Enum.map(properties, & &1.name)
+    struct_fields = build_struct_fields(properties)
 
     checks =
       properties
       |> Enum.map(&property_check_ast(&1, errors_var, data_var, namespace))
       |> Enum.reject(&is_nil/1)
 
+    struct_def =
+      if Enum.empty?(enforce_keys) do
+        quote do
+          defstruct unquote(struct_fields)
+        end
+      else
+        quote do
+          @enforce_keys unquote(enforce_keys)
+          defstruct unquote(struct_fields)
+        end
+      end
+
     quote do
       defmodule unquote(module_name) do
+        unquote(struct_def)
+
         def validate(unquote(data_var)) do
           unquote(errors_var) = []
           unquote_splicing(checks)
 
           if unquote(errors_var) == [] do
-            {:ok, unquote(data_var)}
+            {:ok,
+             struct!(
+               unquote(module_name),
+               Map.take(unquote(data_var), unquote(field_names))
+             )}
           else
             {:error, Enum.reverse(unquote(errors_var))}
           end
@@ -224,6 +267,9 @@ defmodule MetaDsl.Validation do
          namespace
        ) do
     validator = Map.get(annotations, :validate)
+    message = Map.get(annotations, :message)
+    required_msg = message || "is required"
+    invalid_msg = message || "is invalid"
     value_var = Macro.var(:value, nil)
 
     cond do
@@ -235,14 +281,14 @@ defmodule MetaDsl.Validation do
           unquote(errors_var) =
             case Map.get(unquote(data_var), unquote(field)) do
               nil ->
-                [{unquote(field), "is required"} | unquote(errors_var)]
+                [{unquote(field), unquote(required_msg)} | unquote(errors_var)]
 
               unquote(value_var) ->
                 case unquote(fn_call) do
                   :ok -> unquote(errors_var)
                   {:ok, _} -> unquote(errors_var)
                   true -> unquote(errors_var)
-                  false -> [{unquote(field), "is invalid"} | unquote(errors_var)]
+                  false -> [{unquote(field), unquote(invalid_msg)} | unquote(errors_var)]
                   {:error, reason} -> [{unquote(field), reason} | unquote(errors_var)]
                 end
             end
@@ -259,7 +305,7 @@ defmodule MetaDsl.Validation do
               :ok -> unquote(errors_var)
               {:ok, _} -> unquote(errors_var)
               true -> unquote(errors_var)
-              false -> [{unquote(field), "is invalid"} | unquote(errors_var)]
+              false -> [{unquote(field), unquote(invalid_msg)} | unquote(errors_var)]
               {:error, reason} -> [{unquote(field), reason} | unquote(errors_var)]
             end
         end
@@ -269,7 +315,7 @@ defmodule MetaDsl.Validation do
         quote do
           unquote(errors_var) =
             if Map.get(unquote(data_var), unquote(field)) == nil do
-              [{unquote(field), "is required"} | unquote(errors_var)]
+              [{unquote(field), unquote(required_msg)} | unquote(errors_var)]
             else
               unquote(errors_var)
             end
@@ -327,6 +373,13 @@ defmodule MetaDsl.Validation do
   # its quoted representation).  Used directly with a `.()` call.
   defp build_validator_call(ast, value_ast, _namespace) do
     quote do: unquote(ast).(unquote(value_ast))
+  end
+
+  defp build_struct_fields(properties) do
+    Enum.map(properties, fn
+      %MetaDsl.Property{name: name, default: nil} -> name
+      %MetaDsl.Property{name: name, default: default} -> {name, default}
+    end)
   end
 
   defp build_module_name(name, nil) do

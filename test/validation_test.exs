@@ -29,13 +29,19 @@ defmodule MetaDsl.ValidationTest do
 
   defp prop(name, type, opts \\ []) do
     {validate, opts} = Keyword.pop(opts, :validate)
+    {message, opts} = Keyword.pop(opts, :message)
+
+    annotations =
+      %{}
+      |> then(fn a -> if validate, do: Map.put(a, :validate, validate), else: a end)
+      |> then(fn a -> if message, do: Map.put(a, :message, message), else: a end)
 
     %Property{
       name: name,
       type: type,
       required: Keyword.get(opts, :required, false),
       default: Keyword.get(opts, :default, nil),
-      annotations: if(validate, do: %{validate: validate}, else: %{})
+      annotations: annotations
     }
   end
 
@@ -165,7 +171,7 @@ defmodule MetaDsl.ValidationTest do
     assert {:error, [{:breed, "is required"}]} = ValDog.validate(%{})
   end
 
-  test "validate/1 returns the original data in the ok tuple" do
+  test "validate/1 returns an instance of the type on success" do
     types = [
       %MetaType{
         name: :val_returns_data,
@@ -176,15 +182,16 @@ defmodule MetaDsl.ValidationTest do
     [ast] = Validation.generate(types)
     Code.eval_quoted(ast)
 
-    data = %{id: "abc-123"}
-    assert {:ok, ^data} = ValReturnsData.validate(data)
+    assert {:ok, result} = ValReturnsData.validate(%{id: "abc-123"})
+    assert is_struct(result, ValReturnsData)
+    assert result.id == "abc-123"
   end
 
   defmodule SampleStruct do
     defstruct [:id, :name]
   end
 
-  test "validate/1 accepts a struct as input" do
+  test "validate/1 accepts a struct as input and returns a type instance" do
     types = [
       %MetaType{
         name: :val_struct_input,
@@ -195,7 +202,10 @@ defmodule MetaDsl.ValidationTest do
     [ast] = Validation.generate(types)
     Code.eval_quoted(ast)
 
-    assert {:ok, _} = ValStructInput.validate(%SampleStruct{id: "1", name: "Alice"})
+    assert {:ok, result} = ValStructInput.validate(%SampleStruct{id: "1", name: "Alice"})
+    assert is_struct(result, ValStructInput)
+    assert result.id == "1"
+    assert result.name == "Alice"
 
     assert {:error, [{:id, "is required"}]} =
              ValStructInput.validate(%SampleStruct{id: nil, name: "Alice"})
@@ -380,6 +390,96 @@ defmodule MetaDsl.ValidationTest do
     assert {:error, [{:name, "must be non-empty"}]} = ValTupleRequired.validate(%{name: ""})
   end
 
+  # ---------------------------------------------------------------------------
+  # Custom error messages — :message annotation
+  # ---------------------------------------------------------------------------
+
+  test ":message annotation overrides 'is required' for required field" do
+    types = [
+      %MetaType{
+        name: :val_msg_required,
+        properties: [prop(:id, :uuid, required: true, message: "ID cannot be blank")]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, result} = ValMsgRequired.validate(%{id: "1"})
+    assert is_struct(result, ValMsgRequired)
+    assert {:error, [{:id, "ID cannot be blank"}]} = ValMsgRequired.validate(%{id: nil})
+  end
+
+  test ":message annotation overrides 'is invalid' when validator returns false" do
+    types = [
+      %MetaType{
+        name: :val_msg_invalid,
+        properties: [
+          prop(:score, :integer,
+            validate: &MetaDsl.ValidationTest.non_negative_int/1,
+            message: "Score must be non-negative"
+          )
+        ]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, result} = ValMsgInvalid.validate(%{score: 5})
+    assert is_struct(result, ValMsgInvalid)
+    assert {:error, [{:score, "Score must be non-negative"}]} = ValMsgInvalid.validate(%{score: -1})
+  end
+
+  test ":message annotation does not override {:error, reason} from validator" do
+    types = [
+      %MetaType{
+        name: :val_msg_no_override,
+        properties: [
+          prop(:code, :string,
+            validate: &MetaDsl.ValidationTest.three_char_code/1,
+            message: "Custom message"
+          )
+        ]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    # validator returns {:error, "must be 3 characters"} — that reason is preserved
+    assert {:error, [{:code, "must be 3 characters"}]} = ValMsgNoOverride.validate(%{code: "AB"})
+  end
+
+  test ":message annotation works with required field + validator (nil path and invalid path)" do
+    types = [
+      %MetaType{
+        name: :val_msg_required_and_validator,
+        properties: [
+          prop(:name, :string,
+            required: true,
+            validate: &MetaDsl.ValidationTest.non_empty_string/1,
+            message: "Name is required or invalid"
+          )
+        ]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, result} = ValMsgRequiredAndValidator.validate(%{name: "Alice"})
+    assert is_struct(result, ValMsgRequiredAndValidator)
+
+    assert {:error, [{:name, "Name is required or invalid"}]} =
+             ValMsgRequiredAndValidator.validate(%{name: nil})
+
+    # non_empty_string returns {:error, "must be non-empty"} for "" — message annotation
+    # does not override that
+    assert {:error, [{:name, "must be non-empty"}]} =
+             ValMsgRequiredAndValidator.validate(%{name: ""})
+  end
+
   test "anonymous function raises ArgumentError" do
     types = [
       %MetaType{
@@ -451,6 +551,16 @@ defmodule MetaDsl.ValidationTest do
     end
   end
 
+  # Schema using a :message annotation in the DSL property declaration.
+  defmodule CompileTimeSchemaWithMessage do
+    use MetaDsl
+
+    meta_type :val_order do
+      property(:ref, :string, required: true, message: "ref is mandatory")
+      property(:qty, :integer)
+    end
+  end
+
   # All types — validators are nested in this module's namespace.
   defmodule CompileTimeValidators do
     use MetaDsl.Validation,
@@ -476,6 +586,11 @@ defmodule MetaDsl.ValidationTest do
   defmodule CompileTimeValidatorsWithTuple do
     use MetaDsl.Validation,
       schema: MetaDsl.ValidationTest.CompileTimeSchemaWithTupleValidator
+  end
+
+  defmodule CompileTimeValidatorsWithMessage do
+    use MetaDsl.Validation,
+      schema: MetaDsl.ValidationTest.CompileTimeSchemaWithMessage
   end
 
   # Single type via type: atom
@@ -557,6 +672,19 @@ defmodule MetaDsl.ValidationTest do
 
     assert {:error, [{:code, "must be 3 characters"}]} =
              CompileTimeValidatorsWithTuple.ValWidget.validate(%{code: "AB"})
+  end
+
+  test "use macro returns a type instance on success" do
+    assert {:ok, %CompileTimeValidators.ValUser{id: "1", name: "Alice", role: "member"}} =
+             CompileTimeValidators.ValUser.validate(%{id: "1", name: "Alice", role: "member"})
+  end
+
+  test "use macro picks up :message annotation from DSL property declaration" do
+    assert {:ok, %CompileTimeValidatorsWithMessage.ValOrder{ref: "R1"}} =
+             CompileTimeValidatorsWithMessage.ValOrder.validate(%{ref: "R1", qty: 2})
+
+    assert {:error, [{:ref, "ref is mandatory"}]} =
+             CompileTimeValidatorsWithMessage.ValOrder.validate(%{ref: nil})
   end
 
   test "use macro with type: atom generates only the specified type" do

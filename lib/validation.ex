@@ -20,7 +20,7 @@ defmodule MetaDsl.Validation do
 
   ## Custom validators
 
-  Each property can carry a `:validate` annotation whose value is one of:
+  Each property can carry a `:validator` annotation whose value is one of:
 
   * **`{Module, :function_name}`** — a 2-tuple referencing a named function.
   * **`&Module.function/1`** — a remote function capture.
@@ -41,7 +41,7 @@ defmodule MetaDsl.Validation do
   The simplest explicit form — pass the module and function name as a 2-tuple:
 
       meta_type :user do
-        property :email, :string, validate: {MyApp.Validators, :valid_email?}
+        property :email, :string, validator: {MyApp.Validators, :valid_email?}
       end
 
   ### Remote function capture — `&Module.function/1`
@@ -49,7 +49,7 @@ defmodule MetaDsl.Validation do
   Equivalent to the tuple form but using Elixir's capture syntax:
 
       meta_type :user do
-        property :email, :string, validate: &MyApp.Validators.valid_email?/1
+        property :email, :string, validator: &MyApp.Validators.valid_email?/1
       end
 
   ### Atom — `:function_name`
@@ -70,7 +70,7 @@ defmodule MetaDsl.Validation do
         end
       end
 
-      # property declared as: property :email, :string, validate: :validate_email
+      # property declared as: property :email, :string, validator: :validate_email
       # generates: MyApp.Validators.validate_email(value)
 
   When `generate/1` is called directly (no namespace), the atom produces an
@@ -79,7 +79,7 @@ defmodule MetaDsl.Validation do
 
   ### Ordering
 
-  When a property has both `required: true` and a `:validate` annotation, the
+  When a property has both `required: true` and a `:validator` annotation, the
   nil-presence check runs first; the custom validator is only called when the
   value is non-`nil`.
 
@@ -266,7 +266,7 @@ defmodule MetaDsl.Validation do
          data_var,
          namespace
        ) do
-    validator = Map.get(annotations, :validate)
+    validator = Map.get(annotations, :validator)
     message = Map.get(annotations, :validation_error_message)
     required_msg = message || "is required"
     invalid_msg = message || "is invalid"
@@ -363,13 +363,13 @@ defmodule MetaDsl.Validation do
 
       :local ->
         raise ArgumentError,
-              "MetaDsl.Validation: :validate annotation does not accept anonymous functions " <>
+              "MetaDsl.Validation: :validator annotation does not accept anonymous functions " <>
                 "or closures. Use a {Module, :function_name} tuple, a remote function " <>
                 "capture (&Module.function/arity), or a function name atom (:function_name)."
     end
   end
 
-  # AST node from the DSL macro path (e.g. `validate: &Mod.fun/1` stored as
+  # AST node from the DSL macro path (e.g. `validator: &Mod.fun/1` stored as
   # its quoted representation).  Used directly with a `.()` call.
   defp build_validator_call(ast, value_ast, _namespace) do
     quote do: unquote(ast).(unquote(value_ast))

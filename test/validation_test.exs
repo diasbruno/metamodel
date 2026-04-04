@@ -28,12 +28,12 @@ defmodule MetaDsl.ValidationTest do
   # ---------------------------------------------------------------------------
 
   defp prop(name, type, opts \\ []) do
-    {validate, opts} = Keyword.pop(opts, :validate)
+    {validate, opts} = Keyword.pop(opts, :validator)
     {message, opts} = Keyword.pop(opts, :validation_error_message)
 
     annotations =
       %{}
-      |> then(fn a -> if validate, do: Map.put(a, :validate, validate), else: a end)
+      |> then(fn a -> if validate, do: Map.put(a, :validator, validate), else: a end)
       |> then(fn a -> if message, do: Map.put(a, :validation_error_message, message), else: a end)
 
     %Property{
@@ -250,7 +250,7 @@ defmodule MetaDsl.ValidationTest do
     types = [
       %MetaType{
         name: :val_remote_ok,
-        properties: [prop(:code, :string, validate: &MetaDsl.ValidationTest.always_ok/1)]
+        properties: [prop(:code, :string, validator: &MetaDsl.ValidationTest.always_ok/1)]
       }
     ]
 
@@ -266,7 +266,7 @@ defmodule MetaDsl.ValidationTest do
       %MetaType{
         name: :val_remote_error,
         properties: [
-          prop(:code, :string, validate: &MetaDsl.ValidationTest.three_char_code/1)
+          prop(:code, :string, validator: &MetaDsl.ValidationTest.three_char_code/1)
         ]
       }
     ]
@@ -288,7 +288,7 @@ defmodule MetaDsl.ValidationTest do
       %MetaType{
         name: :val_remote_bool,
         properties: [
-          prop(:score, :integer, validate: &MetaDsl.ValidationTest.non_negative_int/1)
+          prop(:score, :integer, validator: &MetaDsl.ValidationTest.non_negative_int/1)
         ]
       }
     ]
@@ -308,7 +308,7 @@ defmodule MetaDsl.ValidationTest do
         properties: [
           prop(:name, :string,
             required: true,
-            validate: &MetaDsl.ValidationTest.non_empty_string/1
+            validator: &MetaDsl.ValidationTest.non_empty_string/1
           )
         ]
       }
@@ -328,7 +328,7 @@ defmodule MetaDsl.ValidationTest do
         name: :val_multi_remote,
         properties: [
           prop(:id, :string, required: true),
-          prop(:code, :string, validate: &MetaDsl.ValidationTest.ok_or_bad_code/1),
+          prop(:code, :string, validator: &MetaDsl.ValidationTest.ok_or_bad_code/1),
           prop(:count, :integer, required: true)
         ]
       }
@@ -352,7 +352,7 @@ defmodule MetaDsl.ValidationTest do
       %MetaType{
         name: :val_tuple_error,
         properties: [
-          prop(:code, :string, validate: {MetaDsl.ValidationTest, :three_char_code})
+          prop(:code, :string, validator: {MetaDsl.ValidationTest, :three_char_code})
         ]
       }
     ]
@@ -376,7 +376,7 @@ defmodule MetaDsl.ValidationTest do
         properties: [
           prop(:name, :string,
             required: true,
-            validate: {MetaDsl.ValidationTest, :non_empty_string}
+            validator: {MetaDsl.ValidationTest, :non_empty_string}
           )
         ]
       }
@@ -416,7 +416,7 @@ defmodule MetaDsl.ValidationTest do
         name: :val_msg_invalid,
         properties: [
           prop(:score, :integer,
-            validate: &MetaDsl.ValidationTest.non_negative_int/1,
+            validator: &MetaDsl.ValidationTest.non_negative_int/1,
             validation_error_message: "Score must be non-negative"
           )
         ]
@@ -437,7 +437,7 @@ defmodule MetaDsl.ValidationTest do
         name: :val_msg_no_override,
         properties: [
           prop(:code, :string,
-            validate: &MetaDsl.ValidationTest.three_char_code/1,
+            validator: &MetaDsl.ValidationTest.three_char_code/1,
             validation_error_message: "Custom message"
           )
         ]
@@ -458,7 +458,7 @@ defmodule MetaDsl.ValidationTest do
         properties: [
           prop(:name, :string,
             required: true,
-            validate: &MetaDsl.ValidationTest.non_empty_string/1,
+            validator: &MetaDsl.ValidationTest.non_empty_string/1,
             validation_error_message: "Name is required or invalid"
           )
         ]
@@ -484,7 +484,7 @@ defmodule MetaDsl.ValidationTest do
     types = [
       %MetaType{
         name: :val_anon_error,
-        properties: [prop(:x, :string, validate: fn _v -> :ok end)]
+        properties: [prop(:x, :string, validator: fn _v -> :ok end)]
       }
     ]
 
@@ -520,7 +520,7 @@ defmodule MetaDsl.ValidationTest do
     meta_type :val_item do
       property(:code, :string,
         required: true,
-        validate: &MetaDsl.ValidationTest.three_char_code/1
+        validator: &MetaDsl.ValidationTest.three_char_code/1
       )
 
       property(:count, :integer)
@@ -532,7 +532,7 @@ defmodule MetaDsl.ValidationTest do
     use MetaDsl
 
     meta_type :val_product do
-      property(:sku, :string, required: true, validate: :validate_sku)
+      property(:sku, :string, required: true, validator: :validate_sku)
       property(:price, :number)
     end
   end
@@ -544,7 +544,7 @@ defmodule MetaDsl.ValidationTest do
     meta_type :val_widget do
       property(:code, :string,
         required: true,
-        validate: {MetaDsl.ValidationTest, :three_char_code}
+        validator: {MetaDsl.ValidationTest, :three_char_code}
       )
 
       property(:qty, :integer)

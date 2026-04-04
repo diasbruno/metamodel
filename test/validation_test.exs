@@ -4,6 +4,29 @@ defmodule MetaDsl.ValidationTest do
   alias MetaDsl.Validation
   alias MetaDsl.{MetaType, Property}
 
+  # ---------------------------------------------------------------------------
+  # Public validator helpers referenced in functional-path tests.
+  # These must be public (def, not defp) so remote captures resolve correctly.
+  # ---------------------------------------------------------------------------
+
+  def always_ok(_v), do: :ok
+
+  def three_char_code(v) do
+    if is_binary(v) and String.length(v) == 3, do: :ok, else: {:error, "must be 3 characters"}
+  end
+
+  def non_negative_int(v), do: is_integer(v) and v >= 0
+
+  def non_empty_string(v) do
+    if is_binary(v) and String.length(v) > 0, do: :ok, else: {:error, "must be non-empty"}
+  end
+
+  def ok_or_bad_code(v), do: if(v == "ok", do: :ok, else: {:error, "bad code"})
+
+  # ---------------------------------------------------------------------------
+  # Prop helper
+  # ---------------------------------------------------------------------------
+
   defp prop(name, type, opts \\ []) do
     {validate, opts} = Keyword.pop(opts, :validate)
 
@@ -210,91 +233,92 @@ defmodule MetaDsl.ValidationTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Custom validators via :validate annotation
+  # Custom validators — remote function captures via functional path
   # ---------------------------------------------------------------------------
 
-  test "custom validator returning :ok marks the field as valid" do
+  test "remote capture returning :ok marks the field as valid" do
     types = [
       %MetaType{
-        name: :val_custom_ok,
-        properties: [prop(:code, :string, validate: fn _v -> :ok end)]
+        name: :val_remote_ok,
+        properties: [prop(:code, :string, validate: &MetaDsl.ValidationTest.always_ok/1)]
       }
     ]
 
     [ast] = Validation.generate(types)
     Code.eval_quoted(ast)
 
-    assert {:ok, _} = ValCustomOk.validate(%{code: "anything"})
-    assert {:ok, _} = ValCustomOk.validate(%{code: nil})
+    assert {:ok, _} = ValRemoteOk.validate(%{code: "anything"})
+    assert {:ok, _} = ValRemoteOk.validate(%{code: nil})
   end
 
-  test "custom validator returning {:error, reason} includes reason in errors" do
-    validator = fn v ->
-      if is_binary(v) and String.length(v) == 3,
-        do: :ok,
-        else: {:error, "must be 3 characters"}
-    end
-
+  test "remote capture returning {:error, reason} includes reason in errors" do
     types = [
       %MetaType{
-        name: :val_custom_error,
-        properties: [prop(:code, :string, validate: validator)]
+        name: :val_remote_error,
+        properties: [
+          prop(:code, :string, validate: &MetaDsl.ValidationTest.three_char_code/1)
+        ]
       }
     ]
 
     [ast] = Validation.generate(types)
     Code.eval_quoted(ast)
 
-    assert {:ok, _} = ValCustomError.validate(%{code: "ABC"})
-    assert {:error, [{:code, "must be 3 characters"}]} = ValCustomError.validate(%{code: "AB"})
-    assert {:error, [{:code, "must be 3 characters"}]} = ValCustomError.validate(%{code: nil})
+    assert {:ok, _} = ValRemoteError.validate(%{code: "ABC"})
+
+    assert {:error, [{:code, "must be 3 characters"}]} =
+             ValRemoteError.validate(%{code: "AB"})
+
+    assert {:error, [{:code, "must be 3 characters"}]} =
+             ValRemoteError.validate(%{code: nil})
   end
 
-  test "custom validator returning true/false uses default 'is invalid' message" do
+  test "remote capture returning true/false uses default 'is invalid' message" do
     types = [
       %MetaType{
-        name: :val_bool_validator,
-        properties: [prop(:score, :integer, validate: fn v -> is_integer(v) and v >= 0 end)]
+        name: :val_remote_bool,
+        properties: [
+          prop(:score, :integer, validate: &MetaDsl.ValidationTest.non_negative_int/1)
+        ]
       }
     ]
 
     [ast] = Validation.generate(types)
     Code.eval_quoted(ast)
 
-    assert {:ok, _} = ValBoolValidator.validate(%{score: 5})
-    assert {:error, [{:score, "is invalid"}]} = ValBoolValidator.validate(%{score: -1})
-    assert {:error, [{:score, "is invalid"}]} = ValBoolValidator.validate(%{score: nil})
+    assert {:ok, _} = ValRemoteBool.validate(%{score: 5})
+    assert {:error, [{:score, "is invalid"}]} = ValRemoteBool.validate(%{score: -1})
+    assert {:error, [{:score, "is invalid"}]} = ValRemoteBool.validate(%{score: nil})
   end
 
-  test "required field with custom validator: nil yields 'is required', not custom error" do
-    validator = fn v ->
-      if is_binary(v) and String.length(v) > 0, do: :ok, else: {:error, "must be non-empty"}
-    end
-
+  test "required field with remote capture: nil yields 'is required', not custom error" do
     types = [
       %MetaType{
-        name: :val_required_with_custom,
-        properties: [prop(:name, :string, required: true, validate: validator)]
+        name: :val_required_remote,
+        properties: [
+          prop(:name, :string,
+            required: true,
+            validate: &MetaDsl.ValidationTest.non_empty_string/1
+          )
+        ]
       }
     ]
 
     [ast] = Validation.generate(types)
     Code.eval_quoted(ast)
 
-    assert {:ok, _} = ValRequiredWithCustom.validate(%{name: "Alice"})
-    assert {:error, [{:name, "is required"}]} = ValRequiredWithCustom.validate(%{name: nil})
-    assert {:error, [{:name, "must be non-empty"}]} = ValRequiredWithCustom.validate(%{name: ""})
+    assert {:ok, _} = ValRequiredRemote.validate(%{name: "Alice"})
+    assert {:error, [{:name, "is required"}]} = ValRequiredRemote.validate(%{name: nil})
+    assert {:error, [{:name, "must be non-empty"}]} = ValRequiredRemote.validate(%{name: ""})
   end
 
-  test "multiple properties with mixed validators accumulate errors in order" do
+  test "multiple properties with mixed remote validators accumulate errors in order" do
     types = [
       %MetaType{
-        name: :val_multi_validators,
+        name: :val_multi_remote,
         properties: [
           prop(:id, :string, required: true),
-          prop(:code, :string,
-            validate: fn v -> if v == "ok", do: :ok, else: {:error, "bad code"} end
-          ),
+          prop(:code, :string, validate: &MetaDsl.ValidationTest.ok_or_bad_code/1),
           prop(:count, :integer, required: true)
         ]
       }
@@ -303,10 +327,23 @@ defmodule MetaDsl.ValidationTest do
     [ast] = Validation.generate(types)
     Code.eval_quoted(ast)
 
-    assert {:ok, _} = ValMultiValidators.validate(%{id: "1", code: "ok", count: 3})
+    assert {:ok, _} = ValMultiRemote.validate(%{id: "1", code: "ok", count: 3})
 
     assert {:error, [{:id, "is required"}, {:code, "bad code"}, {:count, "is required"}]} =
-             ValMultiValidators.validate(%{id: nil, code: "bad", count: nil})
+             ValMultiRemote.validate(%{id: nil, code: "bad", count: nil})
+  end
+
+  test "anonymous function raises ArgumentError" do
+    types = [
+      %MetaType{
+        name: :val_anon_error,
+        properties: [prop(:x, :string, validate: fn _v -> :ok end)]
+      }
+    ]
+
+    assert_raise ArgumentError, ~r/does not accept anonymous functions/, fn ->
+      Validation.generate(types)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -329,17 +366,27 @@ defmodule MetaDsl.ValidationTest do
     end
   end
 
-  defmodule CompileTimeSchemaWithValidator do
+  # Schema using a remote function capture in the DSL property annotation.
+  defmodule CompileTimeSchemaWithRemoteCapture do
     use MetaDsl
 
     meta_type :val_item do
       property(:code, :string,
         required: true,
-        validate: fn v ->
-          if is_binary(v) and String.length(v) == 3, do: :ok, else: {:error, "must be 3 chars"}
-        end
+        validate: &MetaDsl.ValidationTest.three_char_code/1
       )
+
       property(:count, :integer)
+    end
+  end
+
+  # Schema using an atom validator — the function is defined in the validators module below.
+  defmodule CompileTimeSchemaWithAtomValidator do
+    use MetaDsl
+
+    meta_type :val_product do
+      property(:sku, :string, required: true, validate: :validate_sku)
+      property(:price, :number)
     end
   end
 
@@ -349,9 +396,20 @@ defmodule MetaDsl.ValidationTest do
       schema: MetaDsl.ValidationTest.CompileTimeSchema
   end
 
-  defmodule CompileTimeValidatorsWithAnnotation do
+  defmodule CompileTimeValidatorsWithRemoteCapture do
     use MetaDsl.Validation,
-      schema: MetaDsl.ValidationTest.CompileTimeSchemaWithValidator
+      schema: MetaDsl.ValidationTest.CompileTimeSchemaWithRemoteCapture
+  end
+
+  # Atom validator: validate_sku/1 is defined here and is called as
+  # CompileTimeValidatorsWithAtom.validate_sku(value) in the generated code.
+  defmodule CompileTimeValidatorsWithAtom do
+    use MetaDsl.Validation,
+      schema: MetaDsl.ValidationTest.CompileTimeSchemaWithAtomValidator
+
+    def validate_sku(v) do
+      if is_binary(v) and String.length(v) == 6, do: :ok, else: {:error, "must be 6 characters"}
+    end
   end
 
   # Single type via type: atom
@@ -402,15 +460,26 @@ defmodule MetaDsl.ValidationTest do
     assert {:permissions, "is required"} in errors
   end
 
-  test "use macro picks up :validate annotation from DSL property declaration" do
+  test "use macro picks up remote function capture from DSL property declaration" do
     assert {:ok, _} =
-             CompileTimeValidatorsWithAnnotation.ValItem.validate(%{code: "ABC", count: 1})
+             CompileTimeValidatorsWithRemoteCapture.ValItem.validate(%{code: "ABC", count: 1})
 
     assert {:error, [{:code, "is required"}]} =
-             CompileTimeValidatorsWithAnnotation.ValItem.validate(%{code: nil})
+             CompileTimeValidatorsWithRemoteCapture.ValItem.validate(%{code: nil})
 
-    assert {:error, [{:code, "must be 3 chars"}]} =
-             CompileTimeValidatorsWithAnnotation.ValItem.validate(%{code: "AB"})
+    assert {:error, [{:code, "must be 3 characters"}]} =
+             CompileTimeValidatorsWithRemoteCapture.ValItem.validate(%{code: "AB"})
+  end
+
+  test "use macro with atom validator calls the function on the namespace module" do
+    assert {:ok, _} =
+             CompileTimeValidatorsWithAtom.ValProduct.validate(%{sku: "ABC123", price: 9.99})
+
+    assert {:error, [{:sku, "is required"}]} =
+             CompileTimeValidatorsWithAtom.ValProduct.validate(%{sku: nil})
+
+    assert {:error, [{:sku, "must be 6 characters"}]} =
+             CompileTimeValidatorsWithAtom.ValProduct.validate(%{sku: "AB"})
   end
 
   test "use macro with type: atom generates only the specified type" do

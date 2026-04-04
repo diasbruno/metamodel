@@ -15,31 +15,55 @@ defmodule MetaDsl.Validation do
 
   ## Custom validators
 
-  Each property can carry a `:validate` annotation with a function that
-  accepts the field value and returns one of:
+  Each property can carry a `:validate` annotation whose value is either a
+  **remote function capture** or an **atom** naming a function:
+
+  ### Remote function capture — `&Module.function/1`
+
+  The function must be defined in a module and captured with `&/1`.  It receives
+  the field value and must return one of:
 
     * `:ok`, `{:ok, _}`, or `true` — the value is valid.
     * `{:error, reason}` — the value is invalid; `reason` is included in the
       error tuple.
-    * `false` — the value is invalid; the default `"is invalid"` message is
-      used.
-
-  The annotation is an extra option on the `property` declaration:
+    * `false` — the value is invalid; the default `"is invalid"` message is used.
 
       meta_type :user do
-        property :email, :string, validate: fn v ->
+        property :email, :string, validate: &MyApp.Validators.valid_email?/1
+      end
+
+  ### Atom — `:function_name`
+
+  Pass a function name as an atom.  When code is generated via `use
+  MetaDsl.Validation`, the generated validator calls that function on the module
+  that contains the `use` declaration (the *namespace*).  This lets you define
+  the validation logic in the same module that hosts the validators:
+
+      defmodule MyApp.Validators do
+        use MetaDsl.Validation, schema: MyApp.Schema
+
+        def validate_email(v) do
           if is_binary(v) and String.contains?(v, "@"),
             do: :ok,
             else: {:error, "must be a valid email"}
         end
       end
 
+      # property declared as: property :email, :string, validate: :validate_email
+      # generates: MyApp.Validators.validate_email(value)
+
+  When `generate/1` is called directly (no namespace), the atom produces an
+  unqualified local call; the caller is responsible for the function being in
+  scope inside the generated module.
+
+  ### Ordering
+
   When a property has both `required: true` and a `:validate` annotation, the
   nil-presence check runs first; the custom validator is only called when the
   value is non-`nil`.
 
-  When no `:validate` annotation is present, the only check for required fields
-  is the nil-presence check.
+  Anonymous functions and closures are **not** accepted; always use a named
+  module function.
 
   ## Compile-time usage via `use`
 
@@ -159,7 +183,7 @@ defmodule MetaDsl.Validation do
 
     checks =
       properties
-      |> Enum.map(&property_check_ast(&1, errors_var, data_var))
+      |> Enum.map(&property_check_ast(&1, errors_var, data_var, namespace))
       |> Enum.reject(&is_nil/1)
 
     quote do
@@ -183,22 +207,25 @@ defmodule MetaDsl.Validation do
   defp property_check_ast(
          %MetaDsl.Property{name: field, required: required, annotations: annotations},
          errors_var,
-         data_var
+         data_var,
+         namespace
        ) do
     validator = Map.get(annotations, :validate)
-    quoted_validator = quote_validator(validator)
+    value_var = Macro.var(:value, nil)
 
     cond do
       validator != nil && required ->
         # Nil-presence check first; custom validator runs only on non-nil values.
+        fn_call = build_validator_call(validator, value_var, namespace)
+
         quote do
           unquote(errors_var) =
             case Map.get(unquote(data_var), unquote(field)) do
               nil ->
                 [{unquote(field), "is required"} | unquote(errors_var)]
 
-              value ->
-                case unquote(quoted_validator).(value) do
+              unquote(value_var) ->
+                case unquote(fn_call) do
                   :ok -> unquote(errors_var)
                   {:ok, _} -> unquote(errors_var)
                   true -> unquote(errors_var)
@@ -210,9 +237,12 @@ defmodule MetaDsl.Validation do
 
       validator != nil ->
         # Optional field with a custom validator — always call the validator.
+        field_value = quote do: Map.get(unquote(data_var), unquote(field))
+        fn_call = build_validator_call(validator, field_value, namespace)
+
         quote do
           unquote(errors_var) =
-            case unquote(quoted_validator).(Map.get(unquote(data_var), unquote(field))) do
+            case unquote(fn_call) do
               :ok -> unquote(errors_var)
               {:ok, _} -> unquote(errors_var)
               true -> unquote(errors_var)
@@ -237,19 +267,45 @@ defmodule MetaDsl.Validation do
     end
   end
 
-  # When the annotation value is an actual function (functional-usage path),
-  # serialize it to a binary literal so it can be embedded in generated AST.
-  # Any Erlang term, including anonymous function closures, can be serialized
-  # with :erlang.term_to_binary and restored with :erlang.binary_to_term.
-  # The :safe option restricts deserialization to atoms already in the table,
-  # preventing atom exhaustion attacks if the binary were ever tampered with.
-  # When the value is already an AST node (DSL macro path), use it directly.
-  defp quote_validator(validator) when is_function(validator) do
-    binary = :erlang.term_to_binary(validator)
-    quote do: :erlang.binary_to_term(unquote(binary), [:safe])
+  # Atom validator — a named function in the current scope.
+  # When a namespace module is known (compile-time `use` path) the call is
+  # qualified: `Namespace.function_name(value)`.
+  # Without a namespace (functional `generate/1` path) a bare local call is
+  # emitted: `function_name(value)`.
+  defp build_validator_call(atom, value_ast, namespace) when is_atom(atom) do
+    if namespace do
+      {{:., [], [namespace, atom]}, [], [value_ast]}
+    else
+      {atom, [], [value_ast]}
+    end
   end
 
-  defp quote_validator(validator), do: validator
+  # Actual function value stored in a Property struct (functional-path usage).
+  # Only named module functions are accepted; anonymous functions / closures
+  # raise an ArgumentError.  The module and function name are extracted via
+  # Function.info/1 and a proper qualified call AST is emitted.
+  defp build_validator_call(fun, value_ast, _namespace) when is_function(fun) do
+    info = Function.info(fun)
+
+    case info[:type] do
+      :external ->
+        mod = info[:module]
+        name = info[:name]
+        {{:., [], [mod, name]}, [], [value_ast]}
+
+      :local ->
+        raise ArgumentError,
+              "MetaDsl.Validation: :validate annotation does not accept anonymous functions " <>
+                "or closures. Use a remote function capture (&Module.function/arity) " <>
+                "or a function name atom (:function_name)."
+    end
+  end
+
+  # AST node from the DSL macro path (e.g. `validate: &Mod.fun/1` stored as
+  # its quoted representation).  Used directly with a `.()` call.
+  defp build_validator_call(ast, value_ast, _namespace) do
+    quote do: unquote(ast).(unquote(value_ast))
+  end
 
   defp build_module_name(name, nil) do
     name

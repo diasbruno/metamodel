@@ -293,10 +293,10 @@ defmodule MetaDsl.Validation do
     end
   end
 
-  # `{Module, :function_name}` tuple validator.
+  # `{Module, :fun}` tuple validator.
   # Handles both the functional path (where the value is a runtime 2-tuple with
-  # atom module and atom function) and the DSL macro path (where the module is
-  # stored as an alias AST node and the function as an atom).
+  # atom module and atom fun) and the DSL macro path (where the module is
+  # stored as an alias AST node and the fun as an atom).
   # In both cases, the generated call is a fully-qualified `Module.fun(value)`.
   defp build_validator_call({mod, fun}, value_ast, _namespace) when is_atom(fun) do
     {{:., [], [mod, fun]}, [], [value_ast]}

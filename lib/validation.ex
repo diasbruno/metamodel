@@ -42,6 +42,7 @@ defmodule MetaDsl.Validation do
       defmodule MyApp.Validators do
         use MetaDsl.Validation, schema: MyApp.Schema
 
+        # Simplified example — real email validation would use a proper regex.
         def validate_email(v) do
           if is_binary(v) and String.contains?(v, "@"),
             do: :ok,

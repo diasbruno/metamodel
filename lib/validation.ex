@@ -85,14 +85,14 @@ defmodule MetaDsl.Validation do
 
   ## Custom error messages
 
-  Each property can carry a `:message` annotation to override the default error
+  Each property can carry a `:validation_error_message` annotation to override the default error
   strings that the generator uses.  The custom message replaces:
 
     * `"is required"` — emitted when a `required: true` field is `nil`.
     * `"is invalid"` — emitted when a custom validator returns `false`.
 
   Messages returned directly by a validator as `{:error, reason}` are always
-  used as-is; `:message` does not affect them.
+  used as-is; `:validation_error_message` does not affect them.
 
       meta_type :user do
         property :id,    :uuid,   required: true,  message: "ID is required"
@@ -267,7 +267,7 @@ defmodule MetaDsl.Validation do
          namespace
        ) do
     validator = Map.get(annotations, :validate)
-    message = Map.get(annotations, :message)
+    message = Map.get(annotations, :validation_error_message)
     required_msg = message || "is required"
     invalid_msg = message || "is invalid"
     value_var = Macro.var(:value, nil)

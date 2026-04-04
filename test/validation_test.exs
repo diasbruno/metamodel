@@ -29,12 +29,12 @@ defmodule MetaDsl.ValidationTest do
 
   defp prop(name, type, opts \\ []) do
     {validate, opts} = Keyword.pop(opts, :validate)
-    {message, opts} = Keyword.pop(opts, :message)
+    {message, opts} = Keyword.pop(opts, :validation_error_message)
 
     annotations =
       %{}
       |> then(fn a -> if validate, do: Map.put(a, :validate, validate), else: a end)
-      |> then(fn a -> if message, do: Map.put(a, :message, message), else: a end)
+      |> then(fn a -> if message, do: Map.put(a, :validation_error_message, message), else: a end)
 
     %Property{
       name: name,
@@ -391,14 +391,14 @@ defmodule MetaDsl.ValidationTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Custom error messages — :message annotation
+  # Custom error messages — :validation_error_message annotation
   # ---------------------------------------------------------------------------
 
-  test ":message annotation overrides 'is required' for required field" do
+  test ":validation_error_message annotation overrides 'is required' for required field" do
     types = [
       %MetaType{
         name: :val_msg_required,
-        properties: [prop(:id, :uuid, required: true, message: "ID cannot be blank")]
+        properties: [prop(:id, :uuid, required: true, validation_error_message: "ID cannot be blank")]
       }
     ]
 
@@ -410,14 +410,14 @@ defmodule MetaDsl.ValidationTest do
     assert {:error, [{:id, "ID cannot be blank"}]} = ValMsgRequired.validate(%{id: nil})
   end
 
-  test ":message annotation overrides 'is invalid' when validator returns false" do
+  test ":validation_error_message annotation overrides 'is invalid' when validator returns false" do
     types = [
       %MetaType{
         name: :val_msg_invalid,
         properties: [
           prop(:score, :integer,
             validate: &MetaDsl.ValidationTest.non_negative_int/1,
-            message: "Score must be non-negative"
+            validation_error_message: "Score must be non-negative"
           )
         ]
       }
@@ -431,14 +431,14 @@ defmodule MetaDsl.ValidationTest do
     assert {:error, [{:score, "Score must be non-negative"}]} = ValMsgInvalid.validate(%{score: -1})
   end
 
-  test ":message annotation does not override {:error, reason} from validator" do
+  test ":validation_error_message annotation does not override {:error, reason} from validator" do
     types = [
       %MetaType{
         name: :val_msg_no_override,
         properties: [
           prop(:code, :string,
             validate: &MetaDsl.ValidationTest.three_char_code/1,
-            message: "Custom message"
+            validation_error_message: "Custom message"
           )
         ]
       }
@@ -451,7 +451,7 @@ defmodule MetaDsl.ValidationTest do
     assert {:error, [{:code, "must be 3 characters"}]} = ValMsgNoOverride.validate(%{code: "AB"})
   end
 
-  test ":message annotation works with required field + validator (nil path and invalid path)" do
+  test ":validation_error_message annotation works with required field + validator (nil path and invalid path)" do
     types = [
       %MetaType{
         name: :val_msg_required_and_validator,
@@ -459,7 +459,7 @@ defmodule MetaDsl.ValidationTest do
           prop(:name, :string,
             required: true,
             validate: &MetaDsl.ValidationTest.non_empty_string/1,
-            message: "Name is required or invalid"
+            validation_error_message: "Name is required or invalid"
           )
         ]
       }
@@ -551,12 +551,12 @@ defmodule MetaDsl.ValidationTest do
     end
   end
 
-  # Schema using a :message annotation in the DSL property declaration.
+  # Schema using a :validation_error_message annotation in the DSL property declaration.
   defmodule CompileTimeSchemaWithMessage do
     use MetaDsl
 
     meta_type :val_order do
-      property(:ref, :string, required: true, message: "ref is mandatory")
+      property(:ref, :string, required: true, validation_error_message: "ref is mandatory")
       property(:qty, :integer)
     end
   end
@@ -679,7 +679,7 @@ defmodule MetaDsl.ValidationTest do
              CompileTimeValidators.ValUser.validate(%{id: "1", name: "Alice", role: "member"})
   end
 
-  test "use macro picks up :message annotation from DSL property declaration" do
+  test "use macro picks up :validation_error_message annotation from DSL property declaration" do
     assert {:ok, %CompileTimeValidatorsWithMessage.ValOrder{ref: "R1"}} =
              CompileTimeValidatorsWithMessage.ValOrder.validate(%{ref: "R1", qty: 2})
 

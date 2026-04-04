@@ -4,9 +4,6 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
   alias MetaDsl.Generators.ElixirStructs
   alias MetaDsl.{MetaType, Property}
 
-  # Unique namespace so eval'd modules don't collide with anything else.
-  @ns MetaDsl.Test.ElixirStructs
-
   defp prop(name, type, opts \\ []) do
     %Property{
       name: name,
@@ -18,7 +15,7 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
   end
 
   # ---------------------------------------------------------------------------
-  # generate/2
+  # generate/1 — list input
   # ---------------------------------------------------------------------------
 
   test "returns empty list for empty meta types" do
@@ -27,26 +24,25 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
 
   test "returns one quoted expression per meta type" do
     types = [
-      %MetaType{name: :gen_thing_a, properties: []},
-      %MetaType{name: :gen_thing_b, properties: []}
+      %MetaType{name: :gen_list_thing_a, properties: []},
+      %MetaType{name: :gen_list_thing_b, properties: []}
     ]
 
     assert length(ElixirStructs.generate(types)) == 2
   end
 
-  test "generates a struct module with the correct fields" do
+  test "generates struct modules with the correct fields (list)" do
     types = [
       %MetaType{
-        name: :gen_article,
+        name: :gen_list_article,
         properties: [prop(:id, :uuid), prop(:title, :string)]
       }
     ]
 
-    [ast] = ElixirStructs.generate(types, namespace: @ns)
+    [ast] = ElixirStructs.generate(types)
     Code.eval_quoted(ast)
 
-    mod = Module.concat(@ns, "GenArticle")
-    s = struct(mod)
+    s = struct(GenListArticle)
     assert Map.has_key?(s, :id)
     assert Map.has_key?(s, :title)
     assert s.id == nil
@@ -61,11 +57,10 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
       }
     ]
 
-    [ast] = ElixirStructs.generate(types, namespace: @ns)
+    [ast] = ElixirStructs.generate(types)
     Code.eval_quoted(ast)
 
-    mod = Module.concat(@ns, "GenScored")
-    s = struct(mod)
+    s = struct(GenScored)
     assert s.score == 0.0
     assert s.label == "n/a"
   end
@@ -108,29 +103,38 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
     assert Macro.to_string(ast) =~ "SnakeCaseName"
   end
 
-  test "applies namespace option to the generated module name" do
-    types = [%MetaType{name: :gen_entity, properties: [prop(:id, :uuid)]}]
-
-    [ast] = ElixirStructs.generate(types, namespace: @ns)
-    Code.eval_quoted(ast)
-
-    mod = Module.concat(@ns, "GenEntity")
-    assert struct(mod).__struct__ == mod
-  end
-
   test "generates independent struct modules for multiple meta types" do
     types = [
       %MetaType{name: :gen_cat, properties: [prop(:name, :string)]},
       %MetaType{name: :gen_dog, properties: [prop(:breed, :string)]}
     ]
 
-    asts = ElixirStructs.generate(types, namespace: @ns)
-    Enum.each(asts, &Code.eval_quoted/1)
+    ElixirStructs.generate(types) |> Enum.each(&Code.eval_quoted/1)
 
-    cat = struct(Module.concat(@ns, "GenCat"))
-    dog = struct(Module.concat(@ns, "GenDog"))
-    assert Map.has_key?(cat, :name)
-    assert Map.has_key?(dog, :breed)
+    assert Map.has_key?(struct(GenCat), :name)
+    assert Map.has_key?(struct(GenDog), :breed)
+  end
+
+  # ---------------------------------------------------------------------------
+  # generate/1 — single MetaType input
+  # ---------------------------------------------------------------------------
+
+  test "accepts a single MetaType and returns a single quoted expression (not a list)" do
+    meta_type = %MetaType{name: :gen_single_item, properties: [prop(:value, :integer)]}
+    ast = ElixirStructs.generate(meta_type)
+    refute is_list(ast)
+    Code.eval_quoted(ast)
+    assert Map.has_key?(struct(GenSingleItem), :value)
+  end
+
+  test "single MetaType with required field includes @enforce_keys" do
+    meta_type = %MetaType{
+      name: :gen_single_required,
+      properties: [prop(:id, :uuid, required: true), prop(:note, :string)]
+    }
+
+    ast = ElixirStructs.generate(meta_type)
+    assert Macro.to_string(ast) =~ "@enforce_keys"
   end
 
   # ---------------------------------------------------------------------------
@@ -147,16 +151,36 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
     end
 
     subtype(:ct_public_user, from: :ct_user, only: [:id, :name])
+
+    extend_type :ct_admin_user, from: :ct_user do
+      property(:permissions, {:list, :string}, required: true)
+    end
   end
 
+  # All types — structs are nested in this module's namespace.
   defmodule CompileTimeStructs do
     use MetaDsl.Generators.ElixirStructs,
       schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema
   end
 
-  test "use macro defines struct modules under the calling module's namespace" do
+  # Single type via type: atom
+  defmodule SingleTypeStructs do
+    use MetaDsl.Generators.ElixirStructs,
+      schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema,
+      type: :ct_user
+  end
+
+  # Subset via type: list
+  defmodule SubsetStructs do
+    use MetaDsl.Generators.ElixirStructs,
+      schema: MetaDsl.Generators.ElixirStructsTest.CompileTimeSchema,
+      type: [:ct_user, :ct_public_user]
+  end
+
+  test "use macro defines struct modules nested inside the calling module" do
     assert function_exported?(CompileTimeStructs.CtUser, :__struct__, 0)
     assert function_exported?(CompileTimeStructs.CtPublicUser, :__struct__, 0)
+    assert function_exported?(CompileTimeStructs.CtAdminUser, :__struct__, 0)
   end
 
   test "use macro preserves all fields" do
@@ -176,13 +200,22 @@ defmodule MetaDsl.Generators.ElixirStructsTest do
 
   test "use macro embeds @enforce_keys for required fields" do
     code =
-      ElixirStructs.generate(
-        CompileTimeSchema.meta_types(),
-        namespace: CompileTimeStructs
-      )
+      ElixirStructs.generate(CompileTimeSchema.meta_types())
       |> Enum.map(&Macro.to_string/1)
       |> Enum.join("\n")
 
     assert code =~ "@enforce_keys"
+  end
+
+  test "use macro with type: atom generates only the specified type" do
+    assert function_exported?(SingleTypeStructs.CtUser, :__struct__, 0)
+    refute function_exported?(SingleTypeStructs.CtPublicUser, :__struct__, 0)
+    refute function_exported?(SingleTypeStructs.CtAdminUser, :__struct__, 0)
+  end
+
+  test "use macro with type: list generates only the specified types" do
+    assert function_exported?(SubsetStructs.CtUser, :__struct__, 0)
+    assert function_exported?(SubsetStructs.CtPublicUser, :__struct__, 0)
+    refute function_exported?(SubsetStructs.CtAdminUser, :__struct__, 0)
   end
 end

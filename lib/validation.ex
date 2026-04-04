@@ -15,18 +15,33 @@ defmodule MetaDsl.Validation do
 
   ## Custom validators
 
-  Each property can carry a `:validate` annotation whose value is either a
-  **remote function capture** or an **atom** naming a function:
+  Each property can carry a `:validate` annotation whose value is one of:
 
-  ### Remote function capture — `&Module.function/1`
+  * **`{Module, :function_name}`** — a 2-tuple referencing a named function.
+  * **`&Module.function/1`** — a remote function capture.
+  * **`:function_name`** — an atom naming a function in the current scope.
 
-  The function must be defined in a module and captured with `&/1`.  It receives
-  the field value and must return one of:
+  All three forms generate an explicit module-qualified (or scope-qualified)
+  call — anonymous functions and closures are **not** accepted.
+
+  The called function receives the field value and must return one of:
 
     * `:ok`, `{:ok, _}`, or `true` — the value is valid.
     * `{:error, reason}` — the value is invalid; `reason` is included in the
       error tuple.
     * `false` — the value is invalid; the default `"is invalid"` message is used.
+
+  ### `{Module, :function_name}` tuple
+
+  The simplest explicit form — pass the module and function name as a 2-tuple:
+
+      meta_type :user do
+        property :email, :string, validate: {MyApp.Validators, :valid_email?}
+      end
+
+  ### Remote function capture — `&Module.function/1`
+
+  Equivalent to the tuple form but using Elixir's capture syntax:
 
       meta_type :user do
         property :email, :string, validate: &MyApp.Validators.valid_email?/1
@@ -62,9 +77,6 @@ defmodule MetaDsl.Validation do
   When a property has both `required: true` and a `:validate` annotation, the
   nil-presence check runs first; the custom validator is only called when the
   value is non-`nil`.
-
-  Anonymous functions and closures are **not** accepted; always use a named
-  module function.
 
   ## Compile-time usage via `use`
 
@@ -281,6 +293,15 @@ defmodule MetaDsl.Validation do
     end
   end
 
+  # `{Module, :function_name}` tuple validator.
+  # Handles both the functional path (where the value is a runtime 2-tuple with
+  # atom module and atom function) and the DSL macro path (where the module is
+  # stored as an alias AST node and the function as an atom).
+  # In both cases, the generated call is a fully-qualified `Module.fun(value)`.
+  defp build_validator_call({mod, fun}, value_ast, _namespace) when is_atom(fun) do
+    {{:., [], [mod, fun]}, [], [value_ast]}
+  end
+
   # Actual function value stored in a Property struct (functional-path usage).
   # Only named module functions are accepted; anonymous functions / closures
   # raise an ArgumentError.  The module and function name are extracted via
@@ -297,8 +318,8 @@ defmodule MetaDsl.Validation do
       :local ->
         raise ArgumentError,
               "MetaDsl.Validation: :validate annotation does not accept anonymous functions " <>
-                "or closures. Use a remote function capture (&Module.function/arity) " <>
-                "or a function name atom (:function_name)."
+                "or closures. Use a {Module, :function_name} tuple, a remote function " <>
+                "capture (&Module.function/arity), or a function name atom (:function_name)."
     end
   end
 

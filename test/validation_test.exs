@@ -333,6 +333,53 @@ defmodule MetaDsl.ValidationTest do
              ValMultiRemote.validate(%{id: nil, code: "bad", count: nil})
   end
 
+  # ---------------------------------------------------------------------------
+  # Custom validators — {Module, :fun} tuple form via functional path
+  # ---------------------------------------------------------------------------
+
+  test "{Module, :fun} tuple returning {:error, reason} includes reason in errors" do
+    types = [
+      %MetaType{
+        name: :val_tuple_error,
+        properties: [
+          prop(:code, :string, validate: {MetaDsl.ValidationTest, :three_char_code})
+        ]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, _} = ValTupleError.validate(%{code: "ABC"})
+
+    assert {:error, [{:code, "must be 3 characters"}]} =
+             ValTupleError.validate(%{code: "AB"})
+
+    assert {:error, [{:code, "must be 3 characters"}]} =
+             ValTupleError.validate(%{code: nil})
+  end
+
+  test "{Module, :fun} tuple with required: true — nil yields 'is required', not custom error" do
+    types = [
+      %MetaType{
+        name: :val_tuple_required,
+        properties: [
+          prop(:name, :string,
+            required: true,
+            validate: {MetaDsl.ValidationTest, :non_empty_string}
+          )
+        ]
+      }
+    ]
+
+    [ast] = Validation.generate(types)
+    Code.eval_quoted(ast)
+
+    assert {:ok, _} = ValTupleRequired.validate(%{name: "Alice"})
+    assert {:error, [{:name, "is required"}]} = ValTupleRequired.validate(%{name: nil})
+    assert {:error, [{:name, "must be non-empty"}]} = ValTupleRequired.validate(%{name: ""})
+  end
+
   test "anonymous function raises ArgumentError" do
     types = [
       %MetaType{
@@ -390,6 +437,20 @@ defmodule MetaDsl.ValidationTest do
     end
   end
 
+  # Schema using a {Module, :fun} tuple validator in the DSL property annotation.
+  defmodule CompileTimeSchemaWithTupleValidator do
+    use MetaDsl
+
+    meta_type :val_widget do
+      property(:code, :string,
+        required: true,
+        validate: {MetaDsl.ValidationTest, :three_char_code}
+      )
+
+      property(:qty, :integer)
+    end
+  end
+
   # All types — validators are nested in this module's namespace.
   defmodule CompileTimeValidators do
     use MetaDsl.Validation,
@@ -410,6 +471,11 @@ defmodule MetaDsl.ValidationTest do
     def validate_sku(v) do
       if is_binary(v) and String.length(v) == 6, do: :ok, else: {:error, "must be 6 characters"}
     end
+  end
+
+  defmodule CompileTimeValidatorsWithTuple do
+    use MetaDsl.Validation,
+      schema: MetaDsl.ValidationTest.CompileTimeSchemaWithTupleValidator
   end
 
   # Single type via type: atom
@@ -480,6 +546,17 @@ defmodule MetaDsl.ValidationTest do
 
     assert {:error, [{:sku, "must be 6 characters"}]} =
              CompileTimeValidatorsWithAtom.ValProduct.validate(%{sku: "AB"})
+  end
+
+  test "use macro picks up {Module, :fun} tuple validator from DSL property declaration" do
+    assert {:ok, _} =
+             CompileTimeValidatorsWithTuple.ValWidget.validate(%{code: "ABC", qty: 1})
+
+    assert {:error, [{:code, "is required"}]} =
+             CompileTimeValidatorsWithTuple.ValWidget.validate(%{code: nil})
+
+    assert {:error, [{:code, "must be 3 characters"}]} =
+             CompileTimeValidatorsWithTuple.ValWidget.validate(%{code: "AB"})
   end
 
   test "use macro with type: atom generates only the specified type" do

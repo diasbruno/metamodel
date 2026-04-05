@@ -10,8 +10,12 @@ defmodule MetaDsl.Ecto do
   inside whichever module calls the generator.
 
   The generated module calls `use Ecto.Schema` and wraps all field declarations
-  in a `schema/2` block.  The table name is the snake_case plural of the
-  meta-type atom by default (e.g. `:user` → `"users"`).
+  in a `schema/2` block.  The table name is derived from the meta-type atom by appending `"s"` (e.g.
+  `:user` → `"users"`).  This simple strategy works well for regular nouns but
+  does **not** handle irregular plurals (e.g. `:person` → `"persons"` instead
+  of `"people"`) or nouns ending in a sibilant (e.g. `:status` → `"statuss"`).
+  Use the `:table` annotation to supply the correct table name whenever the
+  default is wrong.
 
   ## Type mapping
 
@@ -199,6 +203,8 @@ defmodule MetaDsl.Ecto do
     end
   end
 
+  # Simple pluralization: append "s". Works for regular nouns.
+  # Callers should supply a :table annotation for irregular plurals.
   defp default_table_name(name) do
     name
     |> Atom.to_string()
